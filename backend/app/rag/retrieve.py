@@ -10,6 +10,6 @@ async def retrieve(
     vector = await embeddings.embed_query(query)
     return await vectorstore.search(
         vector,
-        practice_id=practice_id or s.practice_id,
-        top_k=top_k or s.top_k,
+        practice_id=practice_id if practice_id is not None else s.practice_id,
+        top_k=top_k if top_k is not None else s.top_k,
     )
