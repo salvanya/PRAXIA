@@ -11,6 +11,7 @@ def test_settings_load_from_env(monkeypatch: MonkeyPatch) -> None:
     get_settings.cache_clear()
     s = get_settings()
     assert s.ollama_model == "gemma4:12b"
+    assert s.embed_model == "BAAI/bge-m3"
     assert s.qdrant_collection == "praxia_chunks"
     assert s.embed_dim == 1024
     assert s.top_k == 5

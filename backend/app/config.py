@@ -1,4 +1,5 @@
 from functools import lru_cache
+from typing import ClassVar
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -17,8 +18,8 @@ class Settings(BaseSettings):
     top_k: int = 5
 
     # Constants (not from env)
-    qdrant_collection: str = "praxia_chunks"
-    embed_dim: int = 1024
+    qdrant_collection: ClassVar[str] = "praxia_chunks"
+    embed_dim: ClassVar[int] = 1024
 
 
 @lru_cache
