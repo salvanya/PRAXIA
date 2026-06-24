@@ -1,3 +1,4 @@
+import asyncio
 from typing import Any
 
 import asyncpg
@@ -5,12 +6,15 @@ import asyncpg
 from app.config import get_settings
 
 _pool: asyncpg.Pool | None = None
+_pool_lock = asyncio.Lock()
 
 
 async def get_pool() -> asyncpg.Pool:
     global _pool
     if _pool is None:
-        _pool = await asyncpg.create_pool(get_settings().database_url)
+        async with _pool_lock:
+            if _pool is None:
+                _pool = await asyncpg.create_pool(get_settings().database_url)
     return _pool
 
 
@@ -24,19 +28,30 @@ async def insert_document(
         VALUES ($1, $2, $3, $4, $5, 'procesando')
         RETURNING id
         """,
-        practice_id, doc_type, title, file_uri, mime_type,
+        practice_id,
+        doc_type,
+        title,
+        file_uri,
+        mime_type,
     )
+    if row is None:
+        raise RuntimeError("insert_document: la inserción no devolvió fila")
     return str(row["id"])
 
 
 async def set_document_status(
-    document_id: str, status: str, page_count: int | None = None
+    document_id: str, status: str, page_count: int | None = None, *, practice_id: str
 ) -> None:
     pool = await get_pool()
-    await pool.execute(
-        "UPDATE documents SET status = $2, page_count = $3 WHERE id = $1",
-        document_id, status, page_count,
+    result = await pool.execute(
+        "UPDATE documents SET status = $2, page_count = $3 WHERE id = $1 AND practice_id = $4",
+        document_id,
+        status,
+        page_count,
+        practice_id,
     )
+    if result == "UPDATE 0":
+        raise RuntimeError(f"set_document_status: no se actualizó el documento {document_id}")
 
 
 async def list_documents(practice_id: str) -> list[dict[str, Any]]:
