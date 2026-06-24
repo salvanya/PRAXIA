@@ -1,0 +1,51 @@
+from typing import Any
+
+import asyncpg
+
+from app.config import get_settings
+
+_pool: asyncpg.Pool | None = None
+
+
+async def get_pool() -> asyncpg.Pool:
+    global _pool
+    if _pool is None:
+        _pool = await asyncpg.create_pool(get_settings().database_url)
+    return _pool
+
+
+async def insert_document(
+    practice_id: str, doc_type: str, title: str, file_uri: str, mime_type: str
+) -> str:
+    pool = await get_pool()
+    row = await pool.fetchrow(
+        """
+        INSERT INTO documents (practice_id, doc_type, title, file_uri, mime_type, status)
+        VALUES ($1, $2, $3, $4, $5, 'procesando')
+        RETURNING id
+        """,
+        practice_id, doc_type, title, file_uri, mime_type,
+    )
+    return str(row["id"])
+
+
+async def set_document_status(
+    document_id: str, status: str, page_count: int | None = None
+) -> None:
+    pool = await get_pool()
+    await pool.execute(
+        "UPDATE documents SET status = $2, page_count = $3 WHERE id = $1",
+        document_id, status, page_count,
+    )
+
+
+async def list_documents(practice_id: str) -> list[dict[str, Any]]:
+    pool = await get_pool()
+    rows = await pool.fetch(
+        """
+        SELECT id::text, title, doc_type, status, page_count, ingested_at
+        FROM documents WHERE practice_id = $1 ORDER BY ingested_at DESC
+        """,
+        practice_id,
+    )
+    return [dict(r) for r in rows]
