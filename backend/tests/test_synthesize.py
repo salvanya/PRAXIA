@@ -1,5 +1,3 @@
-import pytest
-
 from app.models import Chunk
 from app.rag import synthesize
 
@@ -17,8 +15,14 @@ class FakeLLM:
 
 
 def _chunk() -> Chunk:
-    return Chunk(text="La primera consulta dura 60 minutos.", page=2, chunk_index=0,
-                 document_id="doc-1", title="Protocolo", doc_type="protocolo")
+    return Chunk(
+        text="La primera consulta dura 60 minutos.",
+        page=2,
+        chunk_index=0,
+        document_id="doc-1",
+        title="Protocolo",
+        doc_type="protocolo",
+    )
 
 
 async def test_abstains_without_context():
@@ -27,9 +31,9 @@ async def test_abstains_without_context():
 
 
 async def test_streams_and_cites_with_context():
-    out = "".join([
-        t async for t in synthesize.synthesize_stream("¿cuánto dura?", [_chunk()], llm=FakeLLM())
-    ])
+    out = "".join(
+        [t async for t in synthesize.synthesize_stream("¿cuánto dura?", [_chunk()], llm=FakeLLM())]
+    )
     assert "[1]" in out
 
 
