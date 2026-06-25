@@ -18,6 +18,13 @@ def fake_llm(monkeypatch):
                 yield FakeChunkMsg(token)
 
     monkeypatch.setattr(synthesize, "_default_llm", lambda: FakeLLM())
+    # El router e4b no debe llamar a Ollama en tests no-LLM: forzamos intent rag.
+    from app.graph import router
+
+    async def fake_classify(*_args, **_kwargs):
+        return "rag"
+
+    monkeypatch.setattr(router, "classify_intent", fake_classify)
 
 
 async def _client() -> AsyncClient:
@@ -57,22 +64,9 @@ async def test_ingest_then_chat_streams_sources():
 async def test_chat_returns_503_when_ollama_down(monkeypatch):
     from app import main
 
-    async def fake_retrieve(_message):
-        return [
-            {
-                "text": "x",
-                "page": None,
-                "chunk_index": 0,
-                "document_id": "d",
-                "title": "t",
-                "doc_type": "protocolo",
-            }
-        ]
-
     async def fake_unavailable():
         return False
 
-    monkeypatch.setattr(main, "retrieve", fake_retrieve)
     monkeypatch.setattr(main, "ollama_available", fake_unavailable)
 
     async with await _client() as c:

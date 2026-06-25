@@ -2,28 +2,38 @@ import json
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Any
+from uuid import uuid4
 
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from sse_starlette.sse import EventSourceResponse
 
 from app import db, vectorstore
 from app.config import get_settings
+from app.graph.build import build_graph, get_default_graph
+from app.graph.state import new_state
 from app.ingest.pipeline import ingest_document
-from app.rag.retrieve import retrieve
-from app.rag.synthesize import build_sources, ollama_available, synthesize_stream
+from app.rag.synthesize import ollama_available
 
 SUPPORTED_SUFFIXES = (".pdf", ".md", ".markdown", ".txt")
 
 
 @asynccontextmanager
-async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+async def lifespan(app_: FastAPI) -> AsyncIterator[None]:
     await vectorstore.ensure_collection()
-    yield
+    s = get_settings()
+    # Import diferido: la recolección de tests (httpx ASGITransport) no corre el
+    # lifespan, y así no exige psycopg/Postgres para importar el módulo.
+    from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
+
+    async with AsyncPostgresSaver.from_conn_string(s.database_url) as saver:
+        await saver.setup()
+        app_.state.graph = build_graph(checkpointer=saver)
+        yield
 
 
-app = FastAPI(title="Praxia · Fase 0", lifespan=lifespan)
+app = FastAPI(title="Praxia · Fase 1", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:3000"],
@@ -63,19 +73,31 @@ class ChatRequest(BaseModel):
 
 
 @app.post("/chat")
-async def chat(req: ChatRequest) -> EventSourceResponse:
-    chunks = await retrieve(req.message)
-    if chunks and not await ollama_available():
+async def chat(req: ChatRequest, request: Request) -> EventSourceResponse:
+    # El router e4b (y los nodos LLM) necesitan Ollama: si está caído, 503 amable
+    # antes de abrir el stream SSE (preserva el fix de la limpieza pre-Fase 1).
+    if not await ollama_available():
         raise HTTPException(
             status_code=503,
             detail="El asistente local (Ollama) no está disponible. "
             "Verificá que Ollama esté corriendo y volvé a intentar.",
         )
 
+    graph = getattr(request.app.state, "graph", None) or get_default_graph()
+    s = get_settings()
+    state = new_state(req.message, practice_id=s.practice_id, thread_id=str(uuid4()))
+    config = {"configurable": {"thread_id": state["thread_id"]}}
+
     async def event_stream() -> AsyncIterator[dict]:
-        async for token in synthesize_stream(req.message, chunks):
-            yield {"event": "token", "data": token}
-        yield {"event": "sources", "data": json.dumps(build_sources(chunks), ensure_ascii=False)}
+        async for chunk in graph.astream(state, config, stream_mode="custom"):
+            kind = chunk.get("kind")
+            if kind == "token":
+                yield {"event": "token", "data": chunk["text"]}
+            elif kind == "sources":
+                yield {
+                    "event": "sources",
+                    "data": json.dumps(chunk["sources"], ensure_ascii=False),
+                }
         yield {"event": "done", "data": "[DONE]"}
 
     return EventSourceResponse(event_stream())
