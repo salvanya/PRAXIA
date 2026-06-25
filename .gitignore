@@ -19,3 +19,6 @@ frontend/.next/
 # OS
 Thumbs.db
 .DS_Store
+
+# SDD scratch (briefs, reports, ledger)
+.superpowers/
