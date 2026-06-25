@@ -11,7 +11,7 @@ from app import db, vectorstore
 from app.config import get_settings
 from app.ingest.pipeline import ingest_document
 from app.rag.retrieve import retrieve
-from app.rag.synthesize import build_sources, synthesize_stream
+from app.rag.synthesize import build_sources, ollama_available, synthesize_stream
 
 SUPPORTED_SUFFIXES = (".pdf", ".md", ".markdown", ".txt")
 
@@ -64,6 +64,12 @@ class ChatRequest(BaseModel):
 @app.post("/chat")
 async def chat(req: ChatRequest) -> EventSourceResponse:
     chunks = await retrieve(req.message)
+    if chunks and not await ollama_available():
+        raise HTTPException(
+            status_code=503,
+            detail="El asistente local (Ollama) no está disponible. "
+            "Verificá que Ollama esté corriendo y volvé a intentar.",
+        )
 
     async def event_stream() -> AsyncIterator[dict]:
         async for token in synthesize_stream(req.message, chunks):

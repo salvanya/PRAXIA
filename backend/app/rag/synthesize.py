@@ -29,6 +29,22 @@ def build_sources(chunks: list[Chunk]) -> list[dict[str, Any]]:
     ]
 
 
+async def ollama_available() -> bool:
+    """Probe ligero de conectividad a Ollama (sin cargar el modelo).
+
+    Devuelve False ante cualquier error de red/timeout para que el caller
+    pueda responder un 503 amable en vez de romper a mitad del stream SSE."""
+    import httpx
+
+    s = get_settings()
+    try:
+        async with httpx.AsyncClient(timeout=2.0) as client:
+            resp = await client.get(f"{s.ollama_base_url}/api/version")
+            return resp.status_code == 200
+    except httpx.HTTPError:
+        return False
+
+
 def _default_llm() -> Any:
     from langchain_ollama import ChatOllama
 

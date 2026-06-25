@@ -54,6 +54,33 @@ async def test_ingest_then_chat_streams_sources():
     assert "event: sources" in body
 
 
+async def test_chat_returns_503_when_ollama_down(monkeypatch):
+    from app import main
+
+    async def fake_retrieve(_message):
+        return [
+            {
+                "text": "x",
+                "page": None,
+                "chunk_index": 0,
+                "document_id": "d",
+                "title": "t",
+                "doc_type": "protocolo",
+            }
+        ]
+
+    async def fake_unavailable():
+        return False
+
+    monkeypatch.setattr(main, "retrieve", fake_retrieve)
+    monkeypatch.setattr(main, "ollama_available", fake_unavailable)
+
+    async with await _client() as c:
+        resp = await c.post("/chat", json={"message": "hola"})
+    assert resp.status_code == 503
+    assert "Ollama" in resp.json()["detail"]
+
+
 async def test_ingest_unsupported_type():
     async with await _client() as c:
         resp = await c.post(
