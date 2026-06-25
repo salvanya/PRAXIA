@@ -34,7 +34,17 @@ export async function* streamChat(
     body: JSON.stringify({ message }),
     signal,
   });
-  if (!res.ok || !res.body) throw new Error(`chat failed: ${res.status}`);
+  if (!res.ok) {
+    let detail = `chat failed: ${res.status}`;
+    try {
+      const body = (await res.json()) as { detail?: string };
+      if (body?.detail) detail = body.detail;
+    } catch {
+      // cuerpo no-JSON: dejamos el mensaje por defecto
+    }
+    throw new Error(detail);
+  }
+  if (!res.body) throw new Error(`chat failed: ${res.status}`);
 
   const reader = res.body.getReader();
   const decoder = new TextDecoder("utf-8", { fatal: true });

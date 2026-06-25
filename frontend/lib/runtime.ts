@@ -37,13 +37,21 @@ const adapter: ChatModelAdapter = {
     let answer = "";
     let sources: Source[] = [];
 
-    for await (const ev of streamChat(query, abortSignal)) {
-      if (ev.type === "token") {
-        answer += ev.text;
-        yield { content: [{ type: "text", text: answer }] };
-      } else if (ev.type === "sources") {
-        sources = ev.sources;
+    try {
+      for await (const ev of streamChat(query, abortSignal)) {
+        if (ev.type === "token") {
+          answer += ev.text;
+          yield { content: [{ type: "text", text: answer }] };
+        } else if (ev.type === "sources") {
+          sources = ev.sources;
+        }
       }
+    } catch (err) {
+      if (abortSignal?.aborted) return; // cancelación del usuario: no mostramos error
+      const message =
+        err instanceof Error ? err.message : "No se pudo contactar al asistente.";
+      yield { content: [{ type: "text", text: message }] };
+      return;
     }
 
     // Final yield: accumulated answer + sources block

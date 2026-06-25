@@ -81,3 +81,19 @@ test("streamChat throws on non-ok response", async () => {
     for await (const _ of streamChat("x")) { /* drain */ }
   }).rejects.toThrow();
 });
+
+test("streamChat surfaces the server's friendly detail on 503", async () => {
+  const detail = "El asistente local (Ollama) no está disponible.";
+  vi.stubGlobal(
+    "fetch",
+    vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ detail }), {
+        status: 503,
+        headers: { "Content-Type": "application/json" },
+      }),
+    ),
+  );
+  await expect(async () => {
+    for await (const _ of streamChat("x")) { /* drain */ }
+  }).rejects.toThrow(detail);
+});
