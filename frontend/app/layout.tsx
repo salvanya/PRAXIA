@@ -1,4 +1,5 @@
 import "./globals.css";
+import "@assistant-ui/react/styles/index.css";
 
 export const metadata = { title: "Praxia · Fase 0" };
 
