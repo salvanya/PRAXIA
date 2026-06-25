@@ -12,6 +12,9 @@ class Settings(BaseSettings):
     ollama_base_url: str = "http://localhost:11434"
     ollama_model: str = "gemma4:12b"
     embed_model: str = "BAAI/bge-m3"
+    # TODO(Fase 4): practice_id viene hoy de config (single-tenant en dev).
+    # Con auth real debe derivarse del usuario autenticado por request y
+    # aplicarse vía RLS; nunca un default global. Ver CLAUDE.md §0.5 y §7.
     practice_id: str = "00000000-0000-0000-0000-000000000001"
     chunk_size: int = 1000
     chunk_overlap: int = 150

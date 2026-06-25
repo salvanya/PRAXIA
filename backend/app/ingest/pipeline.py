@@ -14,10 +14,13 @@ async def ingest_document(data: bytes, filename: str, doc_type: str, title: str)
     if existing is not None:
         if existing["status"] == "indexado":
             n_chunks = await vectorstore.count_chunks(existing["id"], s.practice_id)
-            return DocumentSummary(
-                document_id=existing["id"], status="indexado", n_chunks=n_chunks
-            )
-        # Fila previa en 'procesando'/'error' con el mismo contenido: la reusamos
+            if n_chunks > 0:
+                return DocumentSummary(
+                    document_id=existing["id"], status="indexado", n_chunks=n_chunks
+                )
+            # Drift PG/Qdrant: la fila dice 'indexado' pero no hay vectores. Reusamos
+            # la fila y re-indexamos en vez de confiar en un estado inconsistente.
+        # Fila previa en 'procesando'/'error'/drift con el mismo contenido: la reusamos
         # (re-indexar) en vez de insertar otra y violar el índice único.
         document_id = existing["id"]
     else:
@@ -51,4 +54,8 @@ def _mime(filename: str) -> str:
     name = filename.lower()
     if name.endswith(".pdf"):
         return "application/pdf"
-    return "text/markdown"
+    if name.endswith(".txt"):
+        return "text/plain"
+    if name.endswith((".md", ".markdown")):
+        return "text/markdown"
+    return "application/octet-stream"

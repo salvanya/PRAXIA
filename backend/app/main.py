@@ -1,6 +1,7 @@
 import json
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from typing import Any
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
@@ -17,7 +18,7 @@ SUPPORTED_SUFFIXES = (".pdf", ".md", ".markdown", ".txt")
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     await vectorstore.ensure_collection()
     yield
 
@@ -41,7 +42,7 @@ async def ingest(
     file: UploadFile = File(...),  # noqa: B008
     doc_type: str = Form("protocolo"),  # noqa: B008
     title: str = Form(...),  # noqa: B008
-) -> dict:
+) -> dict[str, Any]:
     filename = file.filename or "documento"
     if not filename.lower().endswith(SUPPORTED_SUFFIXES):
         raise HTTPException(status_code=415, detail=f"Tipo no soportado: {filename}")

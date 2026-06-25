@@ -57,6 +57,25 @@ async def count_chunks(document_id: str, practice_id: str) -> int:
     return result.count
 
 
+async def delete_document(document_id: str, practice_id: str) -> None:
+    s = get_settings()
+    await _get_client().delete(
+        collection_name=s.qdrant_collection,
+        points_selector=models.FilterSelector(
+            filter=models.Filter(
+                must=[
+                    models.FieldCondition(
+                        key="document_id", match=models.MatchValue(value=document_id)
+                    ),
+                    models.FieldCondition(
+                        key="practice_id", match=models.MatchValue(value=practice_id)
+                    ),
+                ]
+            )
+        ),
+    )
+
+
 async def search(vector: list[float], practice_id: str, top_k: int) -> list[Chunk]:
     s = get_settings()
     result = await _get_client().query_points(

@@ -4,9 +4,18 @@ from pathlib import Path
 import pytest
 
 from app import db, vectorstore
-from app.ingest.pipeline import ingest_document
+from app.ingest.pipeline import _mime, ingest_document
 
 FIXTURES = Path(__file__).parent / "fixtures"
+
+
+def test_mime_maps_known_suffixes():
+    assert _mime("a.pdf") == "application/pdf"
+    assert _mime("a.PDF") == "application/pdf"
+    assert _mime("a.txt") == "text/plain"
+    assert _mime("a.md") == "text/markdown"
+    assert _mime("a.markdown") == "text/markdown"
+    assert _mime("a.bin") == "application/octet-stream"
 
 
 @pytest.mark.integration
@@ -34,6 +43,33 @@ async def test_ingest_same_content_dedups():
     assert second["status"] == "indexado"
     docs = await db.list_documents(os.environ["PRACTICE_ID"])
     assert sum(1 for d in docs if d["id"] == first["document_id"]) == 1
+
+
+@pytest.mark.integration
+async def test_reindexes_when_vectors_missing():
+    await vectorstore.ensure_collection()
+    data = b"# Drift\nContenido unico para el test de drift PG/Qdrant.\n"
+    first = await ingest_document(data, "drift.md", "protocolo", "Drift")
+    assert first["n_chunks"] >= 1
+    # Drift: Postgres dice 'indexado' pero los vectores ya no están en Qdrant.
+    await vectorstore.delete_document(first["document_id"], os.environ["PRACTICE_ID"])
+    again = await ingest_document(data, "drift.md", "protocolo", "Drift")
+    assert again["document_id"] == first["document_id"]  # reusa la fila, no duplica
+    assert again["n_chunks"] >= 1  # se re-indexó en vez de devolver 0
+
+
+@pytest.mark.integration
+async def test_ingest_error_marks_document_status_error():
+    bad = b"\n\n   \n"  # markdown sin texto extraíble
+    with pytest.raises(ValueError):
+        await ingest_document(bad, "vacio2.md", "protocolo", "Sin texto")
+    import hashlib
+
+    existing = await db.find_document_by_hash(
+        os.environ["PRACTICE_ID"], hashlib.sha256(bad).hexdigest()
+    )
+    assert existing is not None
+    assert existing["status"] == "error"
 
 
 @pytest.mark.integration
