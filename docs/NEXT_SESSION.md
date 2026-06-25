@@ -48,11 +48,12 @@ Grafo LangGraph + router semántico · Agentic RAG correctivo (CRAG: reranker `b
   - ✅ Anotación de retorno de `/ingest` → `dict[str, Any]`.
   - ✅ `lifespan(_app)` deja de sombrear el `app` global.
   - ✅ `practice_id` hardcodeado → TODO claro de multi-tenant real (Fase 4).
-- **Frontend (pendiente — "antes de exponer", no bloquea Fase 1):**
-  - Bump de `next@15.1.3` dentro de 15.x (avisos de `npm audit`) antes de exponer.
-  - Migrar `<Thread>` (deprecado en 0.7.91) a `@assistant-ui/react-ui`.
-  - `TextDecoder` con `{fatal:true}` en `chatStream.ts`.
-  - Persistir `NEXT_TELEMETRY_DISABLED` vía `.env.local`.
+- **Frontend — SALDADO (commits `28e2729`, `7b02f5d`):**
+  - ✅ Bump de `next` 15.1.3 → **15.5.19** (dentro de 15.x): resuelve las advisories de Next.js de `npm audit` (cache poisoning RSC, XSS, SSRF, DoS). Lint/test/build verdes. Quedan advisories de tooling de dev (vitest→esbuild/vite) y del postcss bundleado por Next: solo dev/test loop, no runtime; su fix son majors con breaking changes.
+  - ✅ `TextDecoder("utf-8", {fatal:true})` en `chatStream.ts` + test de char multibyte partido entre chunks.
+  - ✅ `NEXT_TELEMETRY_DISABLED` en `frontend/.env.local` (gitignored por convención Next, per-máquina; documentado en `.env.example` para clones nuevos).
+- **Frontend — DIFERIDO a Fase 1 (no es cleanup de bajo riesgo):**
+  - Migrar `<Thread>` a `@assistant-ui/react-ui`. **Nota:** en la versión instalada (`@assistant-ui/react` 0.7.91) `Thread` NO está deprecado (sin `@deprecated`, build limpio); migrar trae el paquete `react-ui` + wiring de Tailwind/CSS (el `Thread` bundleado trae sus estilos; el de `react-ui` no). Eso es alcance de "frontend más rico" de Fase 1, no limpieza. Hacerlo junto al canvas (tablas/fichas/citas/tarjetas de confirmación).
 
 ### Comandos útiles
 ```bash
