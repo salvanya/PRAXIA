@@ -19,13 +19,19 @@ async def get_pool() -> asyncpg.Pool:
 
 
 async def insert_document(
-    practice_id: str, doc_type: str, title: str, file_uri: str, mime_type: str
+    practice_id: str,
+    doc_type: str,
+    title: str,
+    file_uri: str,
+    mime_type: str,
+    content_hash: str | None = None,
 ) -> str:
     pool = await get_pool()
     row = await pool.fetchrow(
         """
-        INSERT INTO documents (practice_id, doc_type, title, file_uri, mime_type, status)
-        VALUES ($1, $2, $3, $4, $5, 'procesando')
+        INSERT INTO documents
+            (practice_id, doc_type, title, file_uri, mime_type, content_hash, status)
+        VALUES ($1, $2, $3, $4, $5, $6, 'procesando')
         RETURNING id
         """,
         practice_id,
@@ -33,10 +39,22 @@ async def insert_document(
         title,
         file_uri,
         mime_type,
+        content_hash,
     )
     if row is None:
         raise RuntimeError("insert_document: la inserción no devolvió fila")
     return str(row["id"])
+
+
+async def find_document_by_hash(practice_id: str, content_hash: str) -> dict[str, Any] | None:
+    """Devuelve {id, status} del documento con ese contenido en la práctica, o None."""
+    pool = await get_pool()
+    row = await pool.fetchrow(
+        "SELECT id::text, status FROM documents WHERE practice_id = $1 AND content_hash = $2",
+        practice_id,
+        content_hash,
+    )
+    return dict(row) if row is not None else None
 
 
 async def set_document_status(

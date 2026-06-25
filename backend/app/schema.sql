@@ -49,10 +49,17 @@ CREATE TABLE IF NOT EXISTS documents (
     title        TEXT NOT NULL,
     file_uri     TEXT NOT NULL,
     mime_type    TEXT,
+    content_hash TEXT,
     page_count   INT,
     status       TEXT NOT NULL DEFAULT 'procesando'
                  CHECK (status IN ('procesando','indexado','error')),
     ingested_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+-- Para bases ya creadas antes de agregar content_hash (idempotente).
+ALTER TABLE documents ADD COLUMN IF NOT EXISTS content_hash TEXT;
 CREATE INDEX IF NOT EXISTS idx_documents_client ON documents(client_id);
 CREATE INDEX IF NOT EXISTS idx_documents_type ON documents(practice_id, doc_type);
+-- Dedup de ingesta: un mismo contenido no se re-indexa dentro de la práctica.
+-- Los NULL no colisionan en un índice único (filas viejas sin hash conviven).
+CREATE UNIQUE INDEX IF NOT EXISTS idx_documents_content_hash
+    ON documents(practice_id, content_hash);

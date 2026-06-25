@@ -38,6 +38,25 @@ async def upsert_chunks(chunks: list[Chunk], vectors: list[list[float]], practic
     await _get_client().upsert(collection_name=s.qdrant_collection, points=points)
 
 
+async def count_chunks(document_id: str, practice_id: str) -> int:
+    s = get_settings()
+    result = await _get_client().count(
+        collection_name=s.qdrant_collection,
+        count_filter=models.Filter(
+            must=[
+                models.FieldCondition(
+                    key="document_id", match=models.MatchValue(value=document_id)
+                ),
+                models.FieldCondition(
+                    key="practice_id", match=models.MatchValue(value=practice_id)
+                ),
+            ]
+        ),
+        exact=True,
+    )
+    return result.count
+
+
 async def search(vector: list[float], practice_id: str, top_k: int) -> list[Chunk]:
     s = get_settings()
     result = await _get_client().query_points(
