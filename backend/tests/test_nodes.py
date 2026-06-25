@@ -50,8 +50,9 @@ async def test_sql_stub_streams_not_available():
 
 
 async def test_action_stub_streams_not_available():
-    tokens, _ = await _run(nodes.action_stub, new_state("agendá turno", "p", "t"))
+    tokens, sources = await _run(nodes.action_stub, new_state("agendá turno", "p", "t"))
     assert tokens == nodes.STUB_MESSAGE
+    assert sources == []
 
 
 async def test_rag_node_streams_tokens_and_sources(monkeypatch):

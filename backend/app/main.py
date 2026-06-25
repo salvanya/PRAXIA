@@ -23,6 +23,8 @@ SUPPORTED_SUFFIXES = (".pdf", ".md", ".markdown", ".txt")
 async def lifespan(app_: FastAPI) -> AsyncIterator[None]:
     await vectorstore.ensure_collection()
     s = get_settings()
+    # Import diferido: la recolección de tests (httpx ASGITransport) no corre el
+    # lifespan, y así no exige psycopg/Postgres para importar el módulo.
     from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 
     async with AsyncPostgresSaver.from_conn_string(s.database_url) as saver:

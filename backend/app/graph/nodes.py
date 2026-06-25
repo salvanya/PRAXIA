@@ -79,6 +79,7 @@ async def sql_stub(state: AgentState) -> dict:
 
 
 async def action_stub(state: AgentState) -> dict:
+    # TODO(write-slice): reemplazar el stub por interrupt + tarjeta de confirmación (CLAUDE.md §4).
     write_token(STUB_MESSAGE)
     write_sources([])
     return {"sources": [], "messages": [AIMessage(content=STUB_MESSAGE)]}
