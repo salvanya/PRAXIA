@@ -1,0 +1,10 @@
+# Next.js
+/.next/
+next-env.d.ts
+
+# Local env files
+.env
+.env*.local
+
+# TypeScript build cache
+*.tsbuildinfo
