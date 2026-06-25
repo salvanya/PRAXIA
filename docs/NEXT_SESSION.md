@@ -10,26 +10,31 @@
 Vas a continuar el desarrollo de Praxia (CRM conversacional local-first). Antes de actuar:
 
 1. Leé `CLAUDE.md` (contrato operativo) y `Praxia_Blueprint.md` (diseño completo). Respetá el contrato: inferencia 100% local vía Ollama, costo $0, aislamiento multi-tenant por `practice_id` siempre, escrituras solo por tools con confirmación humana, y commits LIMPIOS sin ninguna atribución a Claude.
-2. La Fase 0 (slice vertical mínimo) está MERGEADA en `main` y su aceptación está CERRADA: el smoke en vivo con Gemma real (gemma4:12b vía Ollama) pasó end-to-end en el navegador — respuesta citada (DoD #4) y abstención (DoD #5). Ollama 0.30.9 ya está instalado y el modelo `gemma4:12b` pulled.
+2. La Fase 0 está CERRADA y aceptada, y TODA la limpieza pre-Fase 1 está SALDADA (backend + frontend). No reabras nada de eso. Estamos arrancando FASE 1 (MVP conversacional, alcance en CLAUDE.md §7).
 
-Estado y verificación:
-- Backend: `backend/.venv/Scripts/python -m pytest backend/tests -m "not llm" -q` (19 verdes) + LLM real `... -m llm` (2 verdes, requiere Ollama + infra). ruff + mypy OK.
-- Frontend: `cd frontend && npx vitest run` (8 verdes) + `npm run lint` + `npm run build` OK.
-- Infra: `docker compose up -d` (Postgres + Qdrant). Levantar backend con `backend\.venv\Scripts\python -m uvicorn app.main:app --reload --app-dir backend` y frontend con `npm --prefix frontend run dev` (PowerShell no soporta `cd x && y`).
+Estado y verificación (todo verde al cierre de la última sesión):
+- Backend: `backend\.venv\Scripts\python -m pytest backend/tests -m "not llm" -q` (27 verdes) + `-m llm` (2 verdes, requiere Ollama + infra). ruff + mypy OK.
+- Frontend: `cd frontend; npx vitest run` (10 verdes) + `npx next lint` + `npx next build` OK. `next` ya en 15.5.19.
+- Infra: `docker compose up -d` (Postgres + Qdrant). Backend: `backend\.venv\Scripts\python -m uvicorn app.main:app --app-dir backend --port 8000`. Frontend: `npm --prefix frontend run dev`. (PowerShell NO soporta `cd x && y`.)
+- ⚠️ Si el navegador da "error 500" al subir/chatear: es el backend caído (el front proxya `/api/*` a `:8000`). Levantá uvicorn. Stores quedaron RESETEADOS y limpios.
 
-Tarea de esta sesión (ANTES de Fase 1): saldar los ítems de limpieza diferidos listados en `docs/NEXT_SESSION.md` (sección "Ítems de limpieza diferidos"). Son chicos y de bajo riesgo; agrupalos en pocos commits temáticos. Priorizá:
-- `/chat` debe devolver un 503 amable si Ollama está caído (spec §8) — hoy probablemente rompe feo.
-- Dedup de ingesta: re-indexar el mismo documento crea filas duplicadas en "Documentos" (visto en el smoke). Dedup por hash de contenido + `practice_id`.
-- Validar dim de embeddings vs `settings.embed_dim` (guarda del gotcha 1024) y test del error-path del pipeline.
+Tarea: ARRANCAR FASE 1 con el flujo de siempre: brainstorming → spec → plan (writing-plans) → ejecución subagent-driven con review por tarea. No construyas de más; respetá el alcance por fase de CLAUDE.md §7.
 
-Después de la limpieza, arrancá Fase 1 con el flujo de siempre: brainstorming → spec → plan (writing-plans) → ejecución subagent-driven con review por tarea. No construyas de más; respetá el alcance por fase de CLAUDE.md §7. Decime por dónde querés arrancar Fase 1 (ver lista de alcance abajo).
+Punto de arranque RECOMENDADO y a confirmar conmigo: el **grafo LangGraph + router semántico** (es la base de la que cuelgan CRAG, Data Agent NL2SQL, tools con human-in-the-loop, memoria de corto plazo y guardrails). Alternativas si prefiero: empezar por CRAG (mejora directa del RAG que ya anda) o por NL2SQL. Preguntame por dónde arranco antes de escribir código.
+
+Dos ítems ya DIFERIDOS a Fase 1 (no son cleanup): (a) migrar `<Thread>` a `@assistant-ui/react-ui` junto al canvas más rico; (b) la abstención que todavía muestra fuentes que no usó — lo resuelve de raíz el juez de relevancia de CRAG, no parchear el front.
 ```
 
 ---
 
 ## Contexto de referencia (para vos / la próxima sesión)
 
-### Estado al cierre de esta sesión (2026-06-25)
+### Cierre sesión de limpieza pre-Fase 1 (2026-06-25)
+- **Limpieza backend + frontend saldada** (ver "Ítems de limpieza diferidos" más abajo). Commits: `b695414`, `b226fc2`, `7281a1a`, `28e2729`, `7b02f5d`, `6eae047`.
+- **Smoke en navegador** tras la limpieza: encontró y se arreglaron dos cosas — (#3) con Ollama caído el chat mostraba burbuja vacía → ahora renderiza el mensaje 503 amable (`6eae047`); (#1) fuentes duplicadas eran datos sucios de tests → **stores reseteados** (`documents` vaciada, colección `praxia_chunks` recreada 1024/Cosine). (#2) abstención-muestra-fuentes quedó diferido a CRAG.
+- Suite al cierre: backend 27 (no-llm) + 2 (llm) verdes; frontend 10 verdes, lint+build OK.
+
+### Estado al cierre de la sesión de aceptación de Fase 0 (2026-06-25)
 - **Fase 0 aceptada y cerrada.** Ollama 0.30.9 instalado; `gemma4:12b` confirmado y pulled (el tag SÍ existe; `OLLAMA_MODEL` queda como está). Smoke real verde en el navegador: ingesta → chat citado en streaming → abstención.
 - **Bugs hallados y arreglados durante la aceptación** (commit `aafbf68`, todos en tests/parsers, no en lógica de producto):
   1. `frontend/lib/chatStream.ts` — el parser SSE buscaba `\n\n` pero `sse_starlette` usa CRLF (`\r\n\r\n`) → el mensaje salía VACÍO en el navegador. Ahora tolera `\r?\n`. (era el síntoma "el chat no responde nada").
