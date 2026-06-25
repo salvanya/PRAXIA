@@ -32,6 +32,27 @@ test("streamChat yields tokens, sources, done — even across split chunks", asy
   ]);
 });
 
+test("streamChat parses CRLF line endings (real sse_starlette transport)", async () => {
+  // sse_starlette separates events with \r\n\r\n, not \n\n. The browser must
+  // handle that or the message renders empty.
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValue(sseResponse([
+    "event: token\r\ndata: Ho",
+    "la\r\n\r\nevent: token\r\ndata:  mundo\r\n\r\n",
+    'event: sources\r\ndata: [{"n":1,"title":"Protocolo","page":2,"document_id":"d1"}]\r\n\r\n',
+    "event: done\r\ndata: [DONE]\r\n\r\n",
+  ])));
+
+  const events = [];
+  for await (const ev of streamChat("¿hola?")) events.push(ev);
+
+  expect(events).toEqual([
+    { type: "token", text: "Hola" },
+    { type: "token", text: " mundo" },
+    { type: "sources", sources: [{ n: 1, title: "Protocolo", page: 2, document_id: "d1" }] },
+    { type: "done" },
+  ]);
+});
+
 test("streamChat throws on non-ok response", async () => {
   vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("nope", { status: 503 })));
   await expect(async () => {

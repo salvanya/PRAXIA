@@ -13,7 +13,7 @@ export type ChatEvent =
 function parseEvent(raw: string): ChatEvent | null {
   let event = "message";
   const dataLines: string[] = [];
-  for (const line of raw.split("\n")) {
+  for (const line of raw.split(/\r?\n/)) {
     if (line.startsWith("event:")) event = line.slice(6).trim();
     else if (line.startsWith("data:")) dataLines.push(line.slice(5).replace(/^ /, ""));
   }
@@ -43,10 +43,12 @@ export async function* streamChat(
     const { done, value } = await reader.read();
     if (done) break;
     buffer += decoder.decode(value, { stream: true });
-    let idx: number;
-    while ((idx = buffer.indexOf("\n\n")) !== -1) {
-      const raw = buffer.slice(0, idx);
-      buffer = buffer.slice(idx + 2);
+    // sse_starlette delimits events with \r\n\r\n; tolerate \n\n too.
+    let m: RegExpExecArray | null;
+    const sep = /\r?\n\r?\n/;
+    while ((m = sep.exec(buffer)) !== null) {
+      const raw = buffer.slice(0, m.index);
+      buffer = buffer.slice(m.index + m[0].length);
       const ev = parseEvent(raw);
       if (ev) yield ev;
     }

@@ -25,6 +25,12 @@ async def _reset_async_singletons():
     Also clears the get_settings lru_cache so that any monkeypatched env vars
     in one test (e.g. test_config) do not bleed a stale Settings object into
     subsequent tests."""
+    # sse_starlette keeps a process-global should_exit_event bound to the loop
+    # of the first streaming test; reset it so each test recreates it in its own
+    # loop (otherwise a 2nd streaming test raises "bound to a different loop").
+    from sse_starlette.sse import AppStatus
+
+    AppStatus.should_exit_event = None
     yield
     if db._pool is not None:
         await db._pool.close()
