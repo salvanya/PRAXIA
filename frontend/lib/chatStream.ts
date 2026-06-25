@@ -37,7 +37,7 @@ export async function* streamChat(
   if (!res.ok || !res.body) throw new Error(`chat failed: ${res.status}`);
 
   const reader = res.body.getReader();
-  const decoder = new TextDecoder();
+  const decoder = new TextDecoder("utf-8", { fatal: true });
   let buffer = "";
   while (true) {
     const { done, value } = await reader.read();
