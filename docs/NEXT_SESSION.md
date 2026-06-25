@@ -40,15 +40,15 @@ Después de la limpieza, arrancá Fase 1 con el flujo de siempre: brainstorming 
 Grafo LangGraph + router semántico · Agentic RAG correctivo (CRAG: reranker `bge-reranker-v2-m3` + jueces de relevancia/groundedness) · Data Agent NL2SQL + capa semántica (`semantic_layer/model.yaml`) · tools de escritura con human-in-the-loop (`interrupt`) · memoria de corto plazo (checkpointer Postgres) + memoria semántica básica · guardrails (Presidio PII español + inyección) · caching (semántico + embeddings) · eval mínima (golden set + juez `e4b`) + trazas Phoenix · frontend más rico (canvas: tablas, fichas, citas, vista de docs, tarjetas de confirmación).
 
 ### Ítems de limpieza diferidos (saldar ANTES de Fase 1)
-- **Backend:**
-  - `/chat` debe devolver **503 amable si Ollama está caído** (spec §8). Hoy probablemente lanza una excepción fea.
-  - **Dedup de ingesta**: re-indexar el mismo doc crea filas duplicadas en `documents` (confirmado en el smoke). Dedup por hash de contenido + `practice_id`.
-  - **Validar dim de embeddings** vs `settings.embed_dim` (guarda del gotcha 1024).
-  - Test del **error-path del pipeline** + `_mime` más completo.
-  - Anotación de retorno de `/ingest` → `dict[str, Any]` (hoy `-> dict` pelado).
-  - Renombrar el parámetro `app` del `lifespan` (sombra el `app` global).
-  - `practice_id` hardcodeado → multi-tenant real cuando llegue auth (Fase 4; dejar TODO claro).
-- **Frontend:**
+- **Backend — SALDADO (commits `b695414`, `b226fc2`, `7281a1a`):**
+  - ✅ `/chat` devuelve **503 amable si Ollama está caído** (probe a `/api/version` antes de abrir el stream SSE).
+  - ✅ **Dedup de ingesta** por `sha256(contenido) + practice_id` (índice único en DB + reuso de fila; self-heal ante drift PG/Qdrant).
+  - ✅ **Guarda de dim de embeddings** vs `settings.embed_dim` (gotcha 1024) con mensaje claro.
+  - ✅ Test del **error-path del pipeline** (status `error`) + `_mime` cubre `.pdf/.txt/.md/.markdown/desconocido`.
+  - ✅ Anotación de retorno de `/ingest` → `dict[str, Any]`.
+  - ✅ `lifespan(_app)` deja de sombrear el `app` global.
+  - ✅ `practice_id` hardcodeado → TODO claro de multi-tenant real (Fase 4).
+- **Frontend (pendiente — "antes de exponer", no bloquea Fase 1):**
   - Bump de `next@15.1.3` dentro de 15.x (avisos de `npm audit`) antes de exponer.
   - Migrar `<Thread>` (deprecado en 0.7.91) a `@assistant-ui/react-ui`.
   - `TextDecoder` con `{fatal:true}` en `chatStream.ts`.
