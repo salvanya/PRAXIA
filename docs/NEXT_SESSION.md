@@ -15,7 +15,7 @@ Vas a continuar el desarrollo de Praxia (CRM conversacional local-first). Antes 
 Estado y verificación (todo verde al cierre de la última sesión):
 - Backend: `backend\.venv\Scripts\python -m pytest backend/tests -m "not llm" -q` (27 verdes) + `-m llm` (2 verdes, requiere Ollama + infra). ruff + mypy OK.
 - Frontend: `cd frontend; npx vitest run` (10 verdes) + `npx next lint` + `npx next build` OK. `next` ya en 15.5.19.
-- Infra: `docker compose up -d` (Postgres + Qdrant). Backend: `backend\.venv\Scripts\python -m uvicorn app.main:app --app-dir backend --port 8000`. Frontend: `npm --prefix frontend run dev`. (PowerShell NO soporta `cd x && y`.)
+- Infra: `docker compose up -d` (Postgres + Qdrant). Backend: `backend\.venv\Scripts\python backend\dev.py` (runner que fuerza SelectorEventLoop; **no** uses `python -m uvicorn` directo en Windows, crashea por el ProactorEventLoop vs psycopg async del checkpointer). Frontend: `npm --prefix frontend run dev`. (PowerShell NO soporta `cd x && y`.)
 - ⚠️ Si el navegador da "error 500" al subir/chatear: es el backend caído (el front proxya `/api/*` a `:8000`). Levantá uvicorn. Stores quedaron RESETEADOS y limpios.
 
 Tarea: ARRANCAR FASE 1 con el flujo de siempre: brainstorming → spec → plan (writing-plans) → ejecución subagent-driven con review por tarea. No construyas de más; respetá el alcance por fase de CLAUDE.md §7.
@@ -67,7 +67,7 @@ docker compose up -d
 docker compose exec -T postgres psql -U praxia -d praxia < backend/app/schema.sql
 docker compose exec -T postgres psql -U praxia -d praxia < backend/app/seed.sql
 # Backend (PowerShell: no usar 'cd x && y')
-backend\.venv\Scripts\python -m uvicorn app.main:app --reload --app-dir backend
+backend\.venv\Scripts\python backend\dev.py        # runner con fix Windows (SelectorEventLoop)
 backend\.venv\Scripts\python -m pytest backend/tests -m "not llm" -q     # 19
 backend\.venv\Scripts\python -m pytest backend/tests -m llm -q           # 2 (requiere Ollama)
 # Frontend

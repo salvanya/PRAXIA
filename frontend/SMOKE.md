@@ -2,7 +2,8 @@
 
 Prerequisitos: `docker compose up -d` (Postgres+Qdrant) y Ollama corriendo con el modelo de `OLLAMA_MODEL` pulled.
 
-1. Backend: `backend/.venv/Scripts/python -m uvicorn app.main:app --app-dir backend` (http://localhost:8000)
+1. Backend: `backend/.venv/Scripts/python backend/dev.py` (http://localhost:8000)
+   - En Windows el runner `dev.py` fuerza `SelectorEventLoop` (psycopg async del checkpointer no soporta el `ProactorEventLoop` que uvicorn usa por defecto). No arranques con `python -m uvicorn` directo: crashea en el startup.
 2. Frontend: `cd frontend && npm run dev` (http://localhost:3000)
 3. En el navegador (http://localhost:3000):
    - Soltá `backend/tests/fixtures/protocolo.md` en la drop zone → debe pasar a `indexado` y aparecer en "Documentos".
