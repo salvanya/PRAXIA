@@ -30,10 +30,9 @@ def write_sources(sources: list[dict]) -> None:
 
 
 def _chitchat_llm() -> Any:
-    from langchain_ollama import ChatOllama
+    from app.llm import make_llm
 
-    s = get_settings()
-    return ChatOllama(model=s.ollama_model, base_url=s.ollama_base_url, temperature=0.3)
+    return make_llm(get_settings().ollama_model, temperature=0.3)
 
 
 async def rag_node(state: AgentState) -> dict:

@@ -46,10 +46,9 @@ async def ollama_available() -> bool:
 
 
 def _default_llm() -> Any:
-    from langchain_ollama import ChatOllama
+    from app.llm import make_llm
 
-    s = get_settings()
-    return ChatOllama(model=s.ollama_model, base_url=s.ollama_base_url, temperature=0.1)
+    return make_llm(get_settings().ollama_model, temperature=0.1)
 
 
 async def synthesize_stream(query: str, chunks: list[Chunk], llm: Any = None) -> AsyncIterator[str]:
