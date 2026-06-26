@@ -63,5 +63,6 @@ async def test_real_llm_abstains_when_answer_not_in_context():
         async with c.stream("POST", "/chat", json={"message": msg}) as resp:
             body = "".join([line + "\n" async for line in resp.aiter_lines()])
 
-    answer, _ = _parse_sse(body)
+    answer, sources = _parse_sse(body)
     assert "No encuentro esa información" in answer
+    assert sources == []

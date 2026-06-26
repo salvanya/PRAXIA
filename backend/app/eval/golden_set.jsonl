@@ -1,0 +1,2 @@
+{"question": "¿cuánto dura la primera consulta?", "seed_doc": "protocolo", "expected_behavior": "cited_answer", "must_include": ["60"]}
+{"question": "¿cuál es la dirección del consultorio?", "seed_doc": "protocolo", "expected_behavior": "abstain_no_sources", "must_include": ["No encuentro esa información"]}
