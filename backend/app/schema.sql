@@ -63,3 +63,21 @@ CREATE INDEX IF NOT EXISTS idx_documents_type ON documents(practice_id, doc_type
 -- Los NULL no colisionan en un índice único (filas viejas sin hash conviven).
 CREATE UNIQUE INDEX IF NOT EXISTS idx_documents_content_hash
     ON documents(practice_id, content_hash);
+
+-- ====== Turnos / citas ======
+CREATE TABLE IF NOT EXISTS appointments (
+    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    practice_id     UUID NOT NULL REFERENCES practices(id) ON DELETE CASCADE,
+    client_id       UUID NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
+    practitioner_id UUID NOT NULL REFERENCES practitioners(id),
+    start_at        TIMESTAMPTZ NOT NULL,
+    end_at          TIMESTAMPTZ NOT NULL,
+    status          TEXT NOT NULL DEFAULT 'programado'
+                    CHECK (status IN ('programado','confirmado','atendido','ausente','cancelado')),
+    reason          TEXT,
+    channel         TEXT,
+    created_by      UUID REFERENCES users(id),
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_appt_practice_date ON appointments(practice_id, start_at);
+CREATE INDEX IF NOT EXISTS idx_appt_client ON appointments(client_id);
