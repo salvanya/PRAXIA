@@ -1,3 +1,4 @@
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -31,16 +32,9 @@ def parse_model_yaml(path: str | None = None) -> dict[str, Any]:
 def allowed_tables_from(spec: dict[str, Any]) -> frozenset[str]:
     tables: set[str] = {e["table"] for e in spec["entities"].values()}
     for dim in spec["dimensions"].values():
-        join = dim.get("join", "")
-        for token in join.replace("JOIN", " ").split():
-            if token in {
-                "appointments",
-                "clients",
-                "practitioners",
-                "interactions",
-                "invoices",
-            }:
-                tables.add(token)
+        match = re.search(r"\bJOIN\s+(\w+)", dim.get("join", ""), re.IGNORECASE)
+        if match:
+            tables.add(match.group(1))
     return frozenset(tables)
 
 
