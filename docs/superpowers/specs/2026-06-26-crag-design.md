@@ -61,7 +61,7 @@ backend/app/
 │   ├── rag_subgraph.py   # NUEVO: compila el StateGraph CRAG (nodos finos + edges del loop). PURO.
 │   └── nodes.py          # rag_node pasa a wrapper: arma RagState, invoca el subgrafo, EMITE el SSE.
 ├── rag/
-│   ├── rerank.py         # NUEVO: CrossEncoder bge-reranker-v2-m3 (sigmoid→score, orden, floor, top_k)
+│   ├── rerank.py         # NUEVO: CrossEncoder bge-reranker-v2-m3 (score prob [0,1], orden, floor, top_k)
 │   ├── judges.py         # NUEVO: juez de relevancia + juez de groundedness (e4b, structured output)
 │   ├── reformulate.py    # NUEVO: reescritura de query (e4b, structured output)
 │   ├── synthesize.py     # +synthesize() buffered (reusa el prompt/stream actual)
@@ -148,7 +148,7 @@ así que no necesita persistencia separada.
 | `rerank_model` | `BAAI/bge-reranker-v2-m3` | cross-encoder local. Ya está `sentence-transformers` (lo usa bge-m3): **sin dep nueva**, sí descarga de pesos (~600MB) una vez. |
 | `rag_fetch_k` | `20` | candidatos del retrieve denso antes de rerank |
 | `top_k` | `5` (ya existe) | finales tras rerank |
-| `rerank_min_score` | `0.2` | floor (sigmoid del logit) para descartar basura obvia. El **juez** es el gate real ⇒ floor lenient; se calibra contra el golden set. |
+| `rerank_min_score` | `0.2` | floor sobre la probabilidad [0,1] que devuelve el reranker, para descartar basura obvia. El **juez** es el gate real ⇒ floor lenient; se calibra contra el golden set. |
 | `rag_max_attempts` | `2` | 1 reformulación |
 
 Modelos: `e4b` para los dos jueces + reformulador (clasificación liviana; el router ya prueba
@@ -160,8 +160,9 @@ que `with_structured_output` anda en e4b). `12b` para síntesis. Todo local por 
 ```python
 async def rerank(query: str, chunks: list[Chunk]) -> list[Chunk]
 ```
-- `CrossEncoder(rerank_model).predict([(query, c["text"]) for c in chunks])` → logits;
-  sigmoid → score ∈ [0,1].
+- `CrossEncoder(rerank_model).predict([(query, c["text"]) for c in chunks])` → probabilidad
+  de relevancia ∈ [0,1] (el CrossEncoder de bge-reranker-v2-m3 ya aplica Sigmoid por defecto;
+  **NO re-sigmoidear** o el doble sigmoid comprime todo a [0.5, 0.73] y anula el floor).
 - Ordena desc por score, filtra `score >= rerank_min_score`, corta a `top_k`.
 - `lru_cache` del modelo + `asyncio.to_thread` (igual patrón que `embeddings.py`).
 - El score se usa internamente (orden + floor) y **se descarta**: `Chunk` no cambia.
@@ -307,8 +308,9 @@ Ollama/Postgres/Qdrant locales (DoD §6.5).
 - **Latencia del pipeline en local** (retrieve + rerank + ≥1 juez + síntesis + juez): mitigada
   por jueces/reformulador en `e4b`, cap de 1 reformulación, y floor lenient para no
   sobre-reformular. Si pesa, el siguiente paso natural es semantic cache (F2).
-- **`bge-reranker-v2-m3` vía `CrossEncoder`**: devuelve logits, no probabilidades → aplicar
-  sigmoid antes del floor. Cubierto por `test_rerank.py`.
+- **`bge-reranker-v2-m3` vía `CrossEncoder`**: `predict()` ya devuelve **probabilidades [0,1]**
+  (Sigmoid por defecto); NO re-sigmoidear (doble sigmoid anula el floor). Verificado con el
+  modelo real y guardado por `test_rerank.py::test_real_reranker_...` (marca `-m llm`).
 - **Carga de pesos del reranker** (~600MB, primera vez): descarga única; el fallback al orden
   denso evita que un fallo de carga tumbe el turno.
 - **Fragilidad del e4b en salida estructurada** (CLAUDE.md §9): decodificación restringida (no
