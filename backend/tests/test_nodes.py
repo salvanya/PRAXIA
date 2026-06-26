@@ -3,6 +3,7 @@ from langgraph.graph import END, START, StateGraph
 from app.graph import nodes
 from app.graph.state import AgentState, new_state
 from app.models import Chunk
+from app.rag.synthesize import ABSTAIN_MESSAGE
 
 
 def _one_node_graph(node):
@@ -55,30 +56,32 @@ async def test_action_stub_streams_not_available():
     assert sources == []
 
 
-async def test_rag_node_streams_tokens_and_sources(monkeypatch):
-    async def fake_retrieve(query, practice_id=None, top_k=None):
-        return [_chunk()]
+class FakeCragApp:
+    def __init__(self, result: dict):
+        self._result = result
 
-    async def fake_synth(query, chunks, llm=None):
-        for piece in ["Según ", "el protocolo ", "[1]."]:
-            yield piece
+    async def ainvoke(self, state):
+        return self._result
 
-    monkeypatch.setattr(nodes, "retrieve", fake_retrieve)
-    monkeypatch.setattr(nodes, "synthesize_stream", fake_synth)
 
+async def test_rag_node_emits_answer_and_sources(monkeypatch):
+    result = {
+        "abstained": False,
+        "answer": "Según el protocolo [1].",
+        "sources": [{"n": 1, "title": "Protocolo", "page": 2, "document_id": "doc-1"}],
+        "reranked": [_chunk()],
+    }
+    monkeypatch.setattr(nodes, "crag_app", FakeCragApp(result))
     tokens, sources = await _run(nodes.rag_node, new_state("¿cuánto dura?", "p", "t"))
     assert "[1]" in tokens
     assert sources == [{"n": 1, "title": "Protocolo", "page": 2, "document_id": "doc-1"}]
 
 
-async def test_rag_node_abstains_without_chunks(monkeypatch):
-    async def fake_retrieve(query, practice_id=None, top_k=None):
-        return []
-
-    monkeypatch.setattr(nodes, "retrieve", fake_retrieve)
-
+async def test_rag_node_abstains_emits_no_sources(monkeypatch):
+    result = {"abstained": True, "answer": ABSTAIN_MESSAGE, "sources": [], "reranked": []}
+    monkeypatch.setattr(nodes, "crag_app", FakeCragApp(result))
     tokens, sources = await _run(nodes.rag_node, new_state("algo raro", "p", "t"))
-    assert tokens == nodes.ABSTAIN_MESSAGE
+    assert tokens == ABSTAIN_MESSAGE
     assert sources == []
 
 
@@ -97,3 +100,17 @@ async def test_chitchat_streams_with_fake_llm(monkeypatch):
     tokens, sources = await _run(nodes.chitchat_node, new_state("hola", "p", "t"))
     assert "Hola" in tokens
     assert sources == []
+
+
+async def test_rag_node_replays_long_answer_without_loss(monkeypatch):
+    answer = "abcdefghij " * 10  # 110 chars, crosses several 24-char slice boundaries
+    result = {
+        "abstained": False,
+        "answer": answer,
+        "sources": [{"n": 1, "title": "Protocolo", "page": 2, "document_id": "doc-1"}],
+        "reranked": [_chunk()],
+    }
+    monkeypatch.setattr(nodes, "crag_app", FakeCragApp(result))
+    tokens, sources = await _run(nodes.rag_node, new_state("¿algo largo?", "p", "t"))
+    assert tokens == answer
+    assert sources == result["sources"]

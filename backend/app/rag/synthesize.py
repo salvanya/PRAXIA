@@ -29,6 +29,11 @@ def build_sources(chunks: list[Chunk]) -> list[dict[str, Any]]:
     ]
 
 
+def chunks_text(chunks: list[Chunk]) -> str:
+    """Formatea chunks como lista para prompts de jueces/reformulador (sin marcas de cita)."""
+    return "\n".join(f'- ({c["title"]}) {c["text"]}' for c in chunks)
+
+
 async def ollama_available() -> bool:
     """Probe ligero de conectividad a Ollama (sin cargar el modelo).
 
@@ -46,10 +51,9 @@ async def ollama_available() -> bool:
 
 
 def _default_llm() -> Any:
-    from langchain_ollama import ChatOllama
+    from app.llm import make_llm
 
-    s = get_settings()
-    return ChatOllama(model=s.ollama_model, base_url=s.ollama_base_url, temperature=0.1)
+    return make_llm(get_settings().ollama_model, temperature=0.1)
 
 
 async def synthesize_stream(query: str, chunks: list[Chunk], llm: Any = None) -> AsyncIterator[str]:
@@ -65,3 +69,9 @@ async def synthesize_stream(query: str, chunks: list[Chunk], llm: Any = None) ->
         text = getattr(piece, "content", "")
         if text:
             yield text
+
+
+async def synthesize(query: str, chunks: list[Chunk], llm: Any = None) -> str:
+    """Variante buffered: colecta synthesize_stream a un string. Necesaria para
+    buffer-then-stream — la respuesta se verifica (groundedness) antes de emitirse."""
+    return "".join([piece async for piece in synthesize_stream(query, chunks, llm=llm)])

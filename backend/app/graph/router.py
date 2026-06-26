@@ -2,7 +2,6 @@ from typing import Any, Literal
 
 from pydantic import BaseModel
 
-from app.config import get_settings
 from app.graph.state import AgentState, last_user_text
 
 INTENTS: tuple[str, ...] = ("rag", "sql", "action", "chitchat", "out_of_scope")
@@ -29,10 +28,9 @@ class RouterDecision(BaseModel):
 
 
 def _router_llm() -> Any:
-    from langchain_ollama import ChatOllama
+    from app.llm import make_llm
 
-    s = get_settings()
-    return ChatOllama(model="gemma4:e4b", base_url=s.ollama_base_url, temperature=0.0)
+    return make_llm("gemma4:e4b", temperature=0.0)
 
 
 async def classify_intent(message: str, llm: Any = None) -> str:

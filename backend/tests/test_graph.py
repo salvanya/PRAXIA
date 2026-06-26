@@ -1,5 +1,6 @@
 from app.graph import build, edges, nodes, router
 from app.graph.state import new_state
+from app.rag.synthesize import ABSTAIN_MESSAGE
 
 
 def test_route_maps_intents_to_nodes():
@@ -43,12 +44,13 @@ async def test_graph_routes_out_of_scope_to_safe_answer(monkeypatch):
 
 
 async def test_graph_routes_rag(monkeypatch):
-    async def fake_retrieve(query, practice_id=None, top_k=None):
-        return []
+    class FakeCragApp:
+        async def ainvoke(self, state):
+            return {"abstained": True, "answer": ABSTAIN_MESSAGE, "sources": [], "reranked": []}
 
-    monkeypatch.setattr(nodes, "retrieve", fake_retrieve)
+    monkeypatch.setattr(nodes, "crag_app", FakeCragApp())
     tokens, sources = await _run_full(monkeypatch, "¿qué dice el protocolo?", "rag")
-    assert tokens == nodes.ABSTAIN_MESSAGE
+    assert tokens == ABSTAIN_MESSAGE
 
 
 def test_get_default_graph_is_cached():
