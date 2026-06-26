@@ -1,6 +1,5 @@
 import asyncio
 import logging
-import math
 from functools import lru_cache
 from typing import Any
 
@@ -17,14 +16,14 @@ def _model() -> Any:
     return CrossEncoder(get_settings().rerank_model)
 
 
-def _sigmoid(x: float) -> float:
-    return 1.0 / (1.0 + math.exp(-x))
-
-
 def _score(query: str, chunks: list[Chunk]) -> list[float]:
+    # CrossEncoder(bge-reranker-v2-m3) ya aplica Sigmoid por defecto
+    # (default_activation_function=Sigmoid): predict() devuelve probabilidades de
+    # relevancia en [0,1]. NO re-sigmoidear (comprimiria todo a [0.5, 0.73] y
+    # anularia el floor). Verificado con el modelo real: relevante ~0.999,
+    # irrelevante ~1.6e-5.
     pairs = [(query, c["text"]) for c in chunks]
-    raw = _model().predict(pairs)
-    return [_sigmoid(float(s)) for s in raw]
+    return [float(s) for s in _model().predict(pairs)]
 
 
 async def rerank(query: str, chunks: list[Chunk]) -> list[Chunk]:
