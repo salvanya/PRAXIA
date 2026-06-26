@@ -156,3 +156,81 @@ async def test_synth_self_abstain_skips_groundedness(monkeypatch):
     assert ground["called"] is False
     assert out["abstained"] is True
     assert out["sources"] == []
+
+
+async def test_relevance_judge_failure_is_fail_closed(monkeypatch):
+    """Fail-closed: si el juez de relevancia explota, se trata como insuficiente
+    (reformula/reintenta y termina en abstención sin fuentes)."""
+    retr = {"n": 0}
+
+    async def retrieve(query, practice_id=None, top_k=None):
+        retr["n"] += 1
+        return [_c()]
+
+    async def jr(q, chunks, llm=None):
+        raise RuntimeError("juez caido")
+
+    async def reform(orig, chunks):
+        return "otra"
+
+    _patch(
+        monkeypatch, retrieve=retrieve, rerank=_ok_rerank, judge_relevance=jr, reformulate=reform
+    )
+    out = await rag_subgraph.crag_app.ainvoke(rag_subgraph.initial_rag_state("q", "p"))
+    assert retr["n"] == 2
+    assert out["abstained"] is True
+    assert out["sources"] == []
+
+
+async def test_groundedness_judge_failure_is_fail_closed(monkeypatch):
+    """Fail-closed: si el juez de groundedness explota, se trata como NO fundamentado
+    → abstención sin fuentes (no se filtra la respuesta sin verificar)."""
+
+    async def synth(q, chunks):
+        return "La consulta dura 60 min [1]."
+
+    async def jr(q, chunks, llm=None):
+        return judges.RelevanceVerdict(sufficient=True, reason="ok")
+
+    async def jg(a, chunks, llm=None):
+        raise RuntimeError("juez caido")
+
+    _patch(
+        monkeypatch,
+        retrieve=_ok_retrieve,
+        rerank=_ok_rerank,
+        judge_relevance=jr,
+        synthesize=synth,
+        judge_groundedness=jg,
+    )
+    out = await rag_subgraph.crag_app.ainvoke(rag_subgraph.initial_rag_state("q", "p"))
+    assert out["abstained"] is True
+    assert out["answer"] == ABSTAIN_MESSAGE
+    assert out["sources"] == []
+
+
+async def test_empty_rerank_is_insufficient_without_calling_judge(monkeypatch):
+    """Sin chunks tras rerank, grade marca insuficiente SIN invocar al juez."""
+    calls = {"jr": 0}
+
+    async def empty_rerank(query, chunks):
+        return []
+
+    async def jr(q, chunks, llm=None):
+        calls["jr"] += 1
+        return judges.RelevanceVerdict(sufficient=True, reason="no deberia llamarse")
+
+    async def reform(orig, chunks):
+        return "otra"
+
+    _patch(
+        monkeypatch,
+        retrieve=_ok_retrieve,
+        rerank=empty_rerank,
+        judge_relevance=jr,
+        reformulate=reform,
+    )
+    out = await rag_subgraph.crag_app.ainvoke(rag_subgraph.initial_rag_state("q", "p"))
+    assert calls["jr"] == 0
+    assert out["abstained"] is True
+    assert out["sources"] == []
