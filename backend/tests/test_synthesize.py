@@ -40,3 +40,13 @@ async def test_streams_and_cites_with_context():
 def test_build_sources_numbering():
     sources = synthesize.build_sources([_chunk()])
     assert sources == [{"n": 1, "title": "Protocolo", "page": 2, "document_id": "doc-1"}]
+
+
+async def test_synthesize_buffered_collects_stream():
+    out = await synthesize.synthesize("¿cuánto dura?", [_chunk()], llm=FakeLLM())
+    assert "[1]" in out
+
+
+async def test_synthesize_buffered_abstains_without_context():
+    out = await synthesize.synthesize("hola", [])
+    assert out == synthesize.ABSTAIN_MESSAGE

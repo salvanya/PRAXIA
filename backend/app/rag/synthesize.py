@@ -69,3 +69,9 @@ async def synthesize_stream(query: str, chunks: list[Chunk], llm: Any = None) ->
         text = getattr(piece, "content", "")
         if text:
             yield text
+
+
+async def synthesize(query: str, chunks: list[Chunk], llm: Any = None) -> str:
+    """Variante buffered: colecta synthesize_stream a un string. Necesaria para
+    buffer-then-stream — la respuesta se verifica (groundedness) antes de emitirse."""
+    return "".join([piece async for piece in synthesize_stream(query, chunks, llm=llm)])
