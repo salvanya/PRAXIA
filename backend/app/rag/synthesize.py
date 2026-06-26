@@ -29,6 +29,11 @@ def build_sources(chunks: list[Chunk]) -> list[dict[str, Any]]:
     ]
 
 
+def chunks_text(chunks: list[Chunk]) -> str:
+    """Formatea chunks como lista para prompts de jueces/reformulador (sin marcas de cita)."""
+    return "\n".join(f'- ({c["title"]}) {c["text"]}' for c in chunks)
+
+
 async def ollama_available() -> bool:
     """Probe ligero de conectividad a Ollama (sin cargar el modelo).
 
