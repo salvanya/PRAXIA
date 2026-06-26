@@ -4,9 +4,8 @@ from langchain_core.messages import AIMessage
 from langgraph.config import get_stream_writer
 
 from app.config import get_settings
+from app.graph.rag_subgraph import crag_app, initial_rag_state
 from app.graph.state import AgentState, last_user_text
-from app.rag.retrieve import retrieve
-from app.rag.synthesize import ABSTAIN_MESSAGE, build_sources, synthesize_stream
 
 STUB_MESSAGE = "Esa función todavía no está disponible (próximo slice)."
 SCOPE_MESSAGE = (
@@ -35,21 +34,31 @@ def _chitchat_llm() -> Any:
     return make_llm(get_settings().ollama_model, temperature=0.3)
 
 
-async def rag_node(state: AgentState) -> dict:
-    query = last_user_text(state)
-    chunks = await retrieve(query, practice_id=state["practice_id"])
-    if not chunks:
-        write_token(ABSTAIN_MESSAGE)
-        write_sources([])
-        return {"retrieved": [], "sources": [], "messages": [AIMessage(content=ABSTAIN_MESSAGE)]}
+def _stream_chunks(text: str, size: int = 24) -> list[str]:
+    if not text:
+        return [""]
+    return [text[i : i + size] for i in range(0, len(text), size)]
 
-    full = ""
-    async for piece in synthesize_stream(query, chunks):
+
+async def rag_node(state: AgentState) -> dict:
+    result = await crag_app.ainvoke(initial_rag_state(last_user_text(state), state["practice_id"]))
+    answer = result["answer"]
+    if result["abstained"]:
+        write_token(answer)
+        write_sources([])
+        return {
+            "retrieved": result["reranked"],
+            "sources": [],
+            "messages": [AIMessage(content=answer)],
+        }
+    for piece in _stream_chunks(answer):
         write_token(piece)
-        full += piece
-    sources = build_sources(chunks)
-    write_sources(sources)
-    return {"retrieved": chunks, "sources": sources, "messages": [AIMessage(content=full)]}
+    write_sources(result["sources"])
+    return {
+        "retrieved": result["reranked"],
+        "sources": result["sources"],
+        "messages": [AIMessage(content=answer)],
+    }
 
 
 async def chitchat_node(state: AgentState) -> dict:
