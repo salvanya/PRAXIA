@@ -1,0 +1,32 @@
+entities:
+  appointments: { table: appointments, time_dimension: start_at }
+  clients:      { table: clients,      time_dimension: created_at }
+
+metrics:
+  turnos_totales:
+    sql: "COUNT(*)"
+    from: appointments
+    synonyms: ["turnos", "citas"]
+  ausencias:
+    sql: "COUNT(*) FILTER (WHERE status = 'ausente')"
+    from: appointments
+    synonyms: ["ausentes", "no shows", "faltas", "inasistencias"]
+  clientes_activos:
+    sql: "COUNT(*) FILTER (WHERE status = 'activo')"
+    from: clients
+    synonyms: ["pacientes activos", "clientes activos"]
+
+dimensions:
+  por_profesional:
+    sql: "practitioners.full_name"
+    join: "JOIN practitioners ON appointments.practitioner_id = practitioners.id"
+  por_semana: { sql: "date_trunc('week', start_at)" }
+  por_mes:    { sql: "date_trunc('month', start_at)" }
+  por_estado: { sql: "status" }
+
+glossary:
+  paciente: clients
+  pacientes: clients
+  cliente: clients
+  turno: appointments
+  cita: appointments
