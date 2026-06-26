@@ -19,6 +19,8 @@ class Settings(BaseSettings):
     chunk_size: int = 1000
     chunk_overlap: int = 150
     top_k: int = 5
+    rerank_model: str = "BAAI/bge-reranker-v2-m3"
+    rerank_min_score: float = 0.2
 
     # Constants (not from env)
     qdrant_collection: ClassVar[str] = "praxia_chunks"
