@@ -197,8 +197,12 @@ async def synthesize(query: str, chunks: list[Chunk], llm: Any = None) -> str
   `synthesize_stream` queda para reuso interno. La pregunta es `original_query`.
 
 ### `graph/rag_subgraph.py`
-- Nodos finos: `retrieve_node`, `rerank_node`, `grade_node`, `reformulate_node`,
-  `synthesize_node`, `groundedness_node` (+ helpers de abstención por bandera).
+- Nodos finos: `retrieve_node`, `grade_node`, `reformulate_node`,
+  `synthesize_node`, `groundedness_node`, `abstain_node`.
+  > Nota de implementación: retrieve y rerank quedaron **fusionados en `retrieve_node`**
+  > (no hay nodo `rerank_node` separado): el `RagState` no lleva campo `candidates`, así que
+  > tener un nodo intermedio exigiría uno; rerank corre dentro de `retrieve_node` llamando a
+  > `rerank()`. Funcionalmente idéntico (no hay branch entre ambos).
 - Edges condicionales: tras `grade_node`, `sufficient` → `synthesize_node`; si no y
   `attempts < rag_max_attempts` → `reformulate_node` → vuelve a `retrieve_node`; si no →
   marca `abstained=True` → END. Tras `groundedness_node`, `grounded` → END con `sources`
