@@ -81,7 +81,8 @@ async def synthesize_node(state: RagState) -> dict[str, Any]:
 
 
 def synth_router(state: RagState) -> str:
-    if state["answer"].strip() == ABSTAIN_MESSAGE:
+    answer = state["answer"].strip()
+    if not answer or answer == ABSTAIN_MESSAGE:
         return "abstain"
     return "groundedness"
 

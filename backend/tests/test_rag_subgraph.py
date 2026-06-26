@@ -234,3 +234,31 @@ async def test_empty_rerank_is_insufficient_without_calling_judge(monkeypatch):
     assert calls["jr"] == 0
     assert out["abstained"] is True
     assert out["sources"] == []
+
+
+async def test_empty_synthesis_abstains_without_sources(monkeypatch):
+    """Si la síntesis sale vacía, se auto-abstiene SIN llamar a groundedness ni emitir fuentes."""
+    ground = {"called": False}
+
+    async def synth(q, chunks):
+        return "   "
+
+    async def jr(q, chunks, llm=None):
+        return judges.RelevanceVerdict(sufficient=True, reason="ok")
+
+    async def jg(a, chunks, llm=None):
+        ground["called"] = True
+        return judges.GroundednessVerdict(grounded=True, reason="ok")
+
+    _patch(
+        monkeypatch,
+        retrieve=_ok_retrieve,
+        rerank=_ok_rerank,
+        judge_relevance=jr,
+        synthesize=synth,
+        judge_groundedness=jg,
+    )
+    out = await rag_subgraph.crag_app.ainvoke(rag_subgraph.initial_rag_state("q", "p"))
+    assert ground["called"] is False
+    assert out["abstained"] is True
+    assert out["sources"] == []

@@ -100,3 +100,17 @@ async def test_chitchat_streams_with_fake_llm(monkeypatch):
     tokens, sources = await _run(nodes.chitchat_node, new_state("hola", "p", "t"))
     assert "Hola" in tokens
     assert sources == []
+
+
+async def test_rag_node_replays_long_answer_without_loss(monkeypatch):
+    answer = "abcdefghij " * 10  # 110 chars, crosses several 24-char slice boundaries
+    result = {
+        "abstained": False,
+        "answer": answer,
+        "sources": [{"n": 1, "title": "Protocolo", "page": 2, "document_id": "doc-1"}],
+        "reranked": [_chunk()],
+    }
+    monkeypatch.setattr(nodes, "crag_app", FakeCragApp(result))
+    tokens, sources = await _run(nodes.rag_node, new_state("¿algo largo?", "p", "t"))
+    assert tokens == answer
+    assert sources == result["sources"]
