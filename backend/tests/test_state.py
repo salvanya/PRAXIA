@@ -10,6 +10,8 @@ def test_new_state_has_minimal_shape():
     assert s["intent"] == ""
     assert s["retrieved"] == []
     assert s["sources"] == []
+    assert s["candidate_sql"] == ""
+    assert s["judge_scores"] == {}
     assert len(s["messages"]) == 1
     assert isinstance(s["messages"][0], HumanMessage)
     assert s["messages"][0].content == "hola"

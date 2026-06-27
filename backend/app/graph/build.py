@@ -9,12 +9,12 @@ from app.graph.nodes import (
     chitchat_node,
     rag_node,
     scope_reject_node,
-    sql_stub,
+    sql_node,
 )
 from app.graph.router import router_node
 from app.graph.state import AgentState
 
-_LEAF_NODES = ("rag", "chitchat", "scope_reject", "sql_stub", "action_stub")
+_LEAF_NODES = ("rag", "chitchat", "scope_reject", "sql_node", "action_stub")
 
 
 def build_graph(checkpointer: Any = None) -> Any:
@@ -23,7 +23,7 @@ def build_graph(checkpointer: Any = None) -> Any:
     g.add_node("rag", rag_node)
     g.add_node("chitchat", chitchat_node)
     g.add_node("scope_reject", scope_reject_node)
-    g.add_node("sql_stub", sql_stub)
+    g.add_node("sql_node", sql_node)
     g.add_node("action_stub", action_stub)
 
     g.add_edge(START, "router")
@@ -34,7 +34,7 @@ def build_graph(checkpointer: Any = None) -> Any:
             "rag": "rag",
             "chitchat": "chitchat",
             "scope_reject": "scope_reject",
-            "sql_stub": "sql_stub",
+            "sql_node": "sql_node",
             "action_stub": "action_stub",
         },
     )

@@ -3,6 +3,8 @@ from typing import Any
 from langchain_core.messages import AIMessage
 from langgraph.config import get_stream_writer
 
+from app.agents.sql_agent import answer_structured
+from app.agents.sql_present import synthesize_sql_answer
 from app.config import get_settings
 from app.graph.rag_subgraph import crag_app, initial_rag_state
 from app.graph.state import AgentState, last_user_text
@@ -11,6 +13,9 @@ STUB_MESSAGE = "Esa función todavía no está disponible (próximo slice)."
 SCOPE_MESSAGE = (
     "Solo puedo ayudarte con la información y los datos de tu práctica. "
     "¿Querés que busque algo en tus documentos o tu agenda?"
+)
+SQL_ABSTAIN_MESSAGE = (
+    "No pude traducir tu pregunta a una consulta segura sobre tus datos. ¿Podés reformularla?"
 )
 
 CHITCHAT_SYSTEM = (
@@ -80,10 +85,22 @@ async def scope_reject_node(state: AgentState) -> dict:
     return {"sources": [], "messages": [AIMessage(content=SCOPE_MESSAGE)]}
 
 
-async def sql_stub(state: AgentState) -> dict:
-    write_token(STUB_MESSAGE)
-    write_sources([])
-    return {"sources": [], "messages": [AIMessage(content=STUB_MESSAGE)]}
+async def sql_node(state: AgentState) -> dict:
+    result = await answer_structured(last_user_text(state), state["practice_id"])
+    if result.abstained:
+        write_token(SQL_ABSTAIN_MESSAGE)
+        write_sources([])
+        answer = SQL_ABSTAIN_MESSAGE
+    else:
+        answer = await synthesize_sql_answer(last_user_text(state), result.rows, result.columns)
+        for piece in _stream_chunks(answer):
+            write_token(piece)
+        write_sources([])
+    return {
+        "candidate_sql": result.sql or "",
+        "judge_scores": {"sql_match": not result.abstained},
+        "messages": [AIMessage(content=answer)],
+    }
 
 
 async def action_stub(state: AgentState) -> dict:
