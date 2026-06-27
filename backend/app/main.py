@@ -1,11 +1,12 @@
 import json
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from typing import Any
+from typing import Any, Literal
 from uuid import uuid4
 
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from langgraph.types import Command
 from pydantic import BaseModel
 from sse_starlette.sse import EventSourceResponse
 
@@ -72,6 +73,30 @@ class ChatRequest(BaseModel):
     message: str
 
 
+class ResumeRequest(BaseModel):
+    thread_id: str
+    decision: Literal["confirm", "cancel"]
+
+
+async def _sse_event_stream(graph: Any, inp: Any, config: dict) -> AsyncIterator[dict]:
+    tid = config["configurable"]["thread_id"]
+    async for mode, chunk in graph.astream(inp, config, stream_mode=["custom", "updates"]):
+        if mode == "custom":
+            kind = chunk.get("kind")
+            if kind == "token":
+                yield {"event": "token", "data": chunk["text"]}
+            elif kind == "sources":
+                yield {"event": "sources", "data": json.dumps(chunk["sources"], ensure_ascii=False)}
+        elif mode == "updates" and isinstance(chunk, dict) and "__interrupt__" in chunk:
+            interrupts = chunk["__interrupt__"]
+            value = interrupts[0].value if interrupts else {}
+            yield {
+                "event": "confirm",
+                "data": json.dumps({"thread_id": tid, "action": value}, ensure_ascii=False),
+            }
+    yield {"event": "done", "data": "[DONE]"}
+
+
 @app.post("/chat")
 async def chat(req: ChatRequest, request: Request) -> EventSourceResponse:
     # El router e4b (y los nodos LLM) necesitan Ollama: si está caído, 503 amable
@@ -87,17 +112,12 @@ async def chat(req: ChatRequest, request: Request) -> EventSourceResponse:
     s = get_settings()
     state = new_state(req.message, practice_id=s.practice_id, thread_id=str(uuid4()))
     config = {"configurable": {"thread_id": state["thread_id"]}}
+    return EventSourceResponse(_sse_event_stream(graph, state, config))
 
-    async def event_stream() -> AsyncIterator[dict]:
-        async for chunk in graph.astream(state, config, stream_mode="custom"):
-            kind = chunk.get("kind")
-            if kind == "token":
-                yield {"event": "token", "data": chunk["text"]}
-            elif kind == "sources":
-                yield {
-                    "event": "sources",
-                    "data": json.dumps(chunk["sources"], ensure_ascii=False),
-                }
-        yield {"event": "done", "data": "[DONE]"}
 
-    return EventSourceResponse(event_stream())
+@app.post("/chat/resume")
+async def chat_resume(req: ResumeRequest, request: Request) -> EventSourceResponse:
+    # El resume es determinístico (recibo/cancelación sin LLM) → no probamos Ollama.
+    graph = getattr(request.app.state, "graph", None) or get_default_graph()
+    config = {"configurable": {"thread_id": req.thread_id}}
+    return EventSourceResponse(_sse_event_stream(graph, Command(resume=req.decision), config))
