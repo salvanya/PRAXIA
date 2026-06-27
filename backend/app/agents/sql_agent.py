@@ -1,8 +1,14 @@
 from dataclasses import dataclass, field
+from typing import Any
 
 import sqlglot
 from pydantic import BaseModel
 from sqlglot import exp
+
+from app.config import get_settings
+from app.db import run_select
+from app.llm import make_llm
+from app.semantic_layer.resolver import SemanticLayer, load_semantic_layer
 
 _FORBIDDEN = (
     exp.Insert,
@@ -122,3 +128,78 @@ def validate_select(
         return ValidationResult(False, sql, "practice_id debe ser conjunción AND del WHERE externo")
     _clamp_limit(main, row_limit)
     return ValidationResult(True, root.sql(dialect="postgres"), "ok")
+
+
+def _gen_messages(
+    question: str, layer: SemanticLayer, practice_id: str, feedback: str
+) -> list[tuple[str, str]]:
+    system = (
+        "Sos un generador de SQL para PostgreSQL de un CRM de prácticas profesionales. "
+        "Generá UNA sola consulta SELECT de solo lectura (sin comentarios, sin punto y coma, "
+        "sin múltiples sentencias). Usá EXCLUSIVAMENTE estas tablas y columnas:\n"
+        f"{layer.schema_context}\n\n"
+        "Métricas, dimensiones y sinónimos de negocio (guía):\n"
+        f"{layer.semantic_context}\n\n"
+        f"OBLIGATORIO: filtrá siempre por practice_id = '{practice_id}'. "
+        "Para fechas relativas usá now() y date_trunc (esta semana = "
+        "start_at >= date_trunc('week', now()) AND "
+        "start_at < date_trunc('week', now()) + interval '7 days'). "
+        "Respondé solo el SELECT."
+    )
+    human = f"Pregunta: {question}"
+    if feedback:
+        human += f"\n\nIntento anterior fallido: {feedback}"
+    return [("system", system), ("human", human)]
+
+
+def _judge_messages(question: str, sql: str) -> list[tuple[str, str]]:
+    system = (
+        "Sos un juez. Decidí si la consulta SQL responde la intención de la pregunta. "
+        "matches=true solo si el SELECT devuelve exactamente lo que se pidió."
+    )
+    return [("system", system), ("human", f"Pregunta: {question}\n\nSQL:\n{sql}")]
+
+
+async def answer_structured(
+    question: str,
+    practice_id: str,
+    *,
+    pool: Any = None,
+    gen_llm: Any = None,
+    judge_llm: Any = None,
+) -> SqlResult:
+    settings = get_settings()
+    layer = await load_semantic_layer(pool)
+    gen = (gen_llm or make_llm(settings.ollama_model, temperature=0.0)).with_structured_output(
+        SqlDraft
+    )
+    judge = (judge_llm or make_llm("gemma4:e4b", temperature=0.0)).with_structured_output(
+        SqlIntentVerdict
+    )
+    feedback = ""
+    last_reason = "sin intentos"
+    for _ in range(settings.sql_max_attempts):
+        try:
+            draft: SqlDraft = await gen.ainvoke(
+                _gen_messages(question, layer, practice_id, feedback)
+            )
+            vr = validate_select(
+                draft.sql, layer.allowed_tables, practice_id, settings.sql_row_limit
+            )
+            if not vr.ok:
+                last_reason = vr.reason
+                feedback = f"SQL inválido: {vr.reason}. Corregilo."
+                continue
+            verdict: SqlIntentVerdict = await judge.ainvoke(_judge_messages(question, vr.sql))
+            if not verdict.matches:
+                last_reason = verdict.reason
+                feedback = f"El SQL no respondía la intención: {verdict.reason}."
+                continue
+            rows, columns = await run_select(
+                vr.sql, timeout_ms=settings.sql_timeout_ms, row_limit=settings.sql_row_limit
+            )
+            return SqlResult(sql=vr.sql, rows=rows, columns=columns, abstained=False, reason="ok")
+        except Exception as e:  # noqa: BLE001 - fail-closed: cualquier fallo cuenta como intento
+            last_reason = f"error: {e}"
+            feedback = "Reintentá con un SELECT simple y válido."
+    return SqlResult(sql=None, abstained=True, reason=last_reason)
