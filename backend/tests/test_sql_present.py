@@ -45,3 +45,13 @@ def test_render_rows_markdown_builds_table() -> None:
     )
     assert "| full_name |" in md
     assert "| Ana |" in md and "| Beto |" in md
+
+
+def test_render_rows_markdown_renders_null_as_empty() -> None:
+    # NULL de SQL llega como None: debe verse como celda vacía, no el literal "None".
+    md = sql_present.render_rows_markdown(
+        [{"full_name": "Ana", "email": None}], ["full_name", "email"]
+    )
+    assert "None" not in md
+    assert "| full_name | email |" in md
+    assert "| Ana |  |" in md

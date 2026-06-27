@@ -22,3 +22,6 @@ async def test_seed_demo_creates_data_with_appointments_this_week() -> None:
 
     n_active = await pool.fetchval("SELECT count(*) FROM clients WHERE status = 'activo'")
     assert n_active >= 1
+
+    n_email = await pool.fetchval("SELECT count(*) FROM clients WHERE email IS NOT NULL")
+    assert n_email >= 30

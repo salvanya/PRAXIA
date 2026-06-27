@@ -58,11 +58,14 @@ async def seed_demo() -> dict[str, int]:
         cid = _det_uuid(f"client-{i}")
         clients.append(cid)
         await pool.execute(
-            "INSERT INTO clients (id, practice_id, full_name, status) "
-            "VALUES ($1, $2, $3, $4) ON CONFLICT (id) DO NOTHING",
+            "INSERT INTO clients (id, practice_id, full_name, email, phone, status) "
+            "VALUES ($1, $2, $3, $4, $5, $6) "
+            "ON CONFLICT (id) DO UPDATE SET email = EXCLUDED.email, phone = EXCLUDED.phone",
             cid,
             practice_id,
             fake.name(),
+            fake.email(),
+            fake.phone_number(),
             rng.choice(_CLIENT_STATUS),
         )
 

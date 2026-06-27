@@ -18,13 +18,18 @@ def _default_llm() -> Any:
     return make_llm(get_settings().ollama_model, temperature=0.1)
 
 
+def _fmt(value: Any) -> str:
+    """Render una celda; NULL de SQL (None) → vacío, no el literal 'None'."""
+    return "" if value is None else str(value)
+
+
 def render_rows_markdown(rows: list[dict], columns: list[str]) -> str:
     if not rows:
         return ""
     cols = columns or list(rows[0].keys())
     header = "| " + " | ".join(cols) + " |"
     sep = "| " + " | ".join("---" for _ in cols) + " |"
-    body = "\n".join("| " + " | ".join(str(r.get(c, "")) for c in cols) + " |" for r in rows)
+    body = "\n".join("| " + " | ".join(_fmt(r.get(c)) for c in cols) + " |" for r in rows)
     return f"{header}\n{sep}\n{body}"
 
 
@@ -41,7 +46,7 @@ def _grounded(answer: str, rows: list[dict]) -> bool:
 def _deterministic(rows: list[dict], columns: list[str]) -> str:
     cols = columns or list(rows[0].keys())
     if len(rows) == 1 and len(cols) == 1:
-        return f"Resultado: {list(rows[0].values())[0]}"
+        return f"Resultado: {_fmt(list(rows[0].values())[0])}"
     return render_rows_markdown(rows, columns)
 
 
