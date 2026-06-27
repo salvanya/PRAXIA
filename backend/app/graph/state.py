@@ -22,6 +22,7 @@ class AgentState(TypedDict):
     sources: list[dict]
     candidate_sql: str
     judge_scores: dict
+    proposed_action: dict | None
 
 
 def new_state(message: str, practice_id: str, thread_id: str) -> AgentState:
@@ -34,6 +35,7 @@ def new_state(message: str, practice_id: str, thread_id: str) -> AgentState:
         "sources": [],
         "candidate_sql": "",
         "judge_scores": {},
+        "proposed_action": None,
     }
 
 

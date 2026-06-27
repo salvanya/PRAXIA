@@ -26,6 +26,8 @@ class Settings(BaseSettings):
     sql_row_limit: int = 200
     sql_timeout_ms: int = 5000
     sql_max_attempts: int = 2
+    appt_default_duration_min: int = 30
+    appt_name_match_limit: int = 5
 
     # Constants (not from env)
     qdrant_collection: ClassVar[str] = "praxia_chunks"

@@ -1,5 +1,6 @@
 from langchain_core.messages import AIMessage, HumanMessage
 
+from app.config import get_settings
 from app.graph.state import last_user_text, new_state
 
 
@@ -28,3 +29,14 @@ def test_last_user_text_empty_when_no_human():
     s = new_state("x", practice_id="p", thread_id="t")
     s["messages"] = [AIMessage(content="solo asistente")]
     assert last_user_text(s) == ""
+
+
+def test_new_state_inits_proposed_action_none() -> None:
+    state = new_state("hola", "pid", "tid")
+    assert state["proposed_action"] is None
+
+
+def test_appointment_config_defaults() -> None:
+    s = get_settings()
+    assert s.appt_default_duration_min == 30
+    assert s.appt_name_match_limit == 5
