@@ -41,14 +41,43 @@ class SqlIntentVerdict(BaseModel):
     reason: str
 
 
-def _has_practice_filter(root: exp.Expression, practice_id: str) -> bool:
-    for eq in root.find_all(exp.EQ):
-        col = eq.find(exp.Column)
-        lit = eq.find(exp.Literal)
-        if col is not None and col.name == "practice_id" and lit is not None:
-            if lit.is_string and lit.name == practice_id:
-                return True
+def _strip_parens(node: exp.Expression) -> exp.Expression:
+    while isinstance(node, exp.Paren):
+        node = node.this
+    return node
+
+
+def _and_conjuncts(node: exp.Expression) -> list[exp.Expression]:
+    node = _strip_parens(node)
+    if isinstance(node, exp.And):
+        return _and_conjuncts(node.left) + _and_conjuncts(node.right)
+    return [node]
+
+
+def _is_practice_eq(node: exp.Expression, practice_id: str) -> bool:
+    node = _strip_parens(node)
+    if not isinstance(node, exp.EQ):
+        return False
+    for col_side, lit_side in ((node.left, node.right), (node.right, node.left)):
+        if (
+            isinstance(col_side, exp.Column)
+            and col_side.name == "practice_id"
+            and isinstance(lit_side, exp.Literal)
+            and lit_side.is_string
+            and lit_side.name == practice_id
+        ):
+            return True
     return False
+
+
+def _has_tenant_scope(main: exp.Select, practice_id: str) -> bool:
+    """True solo si `practice_id = '<pid>'` es una conjunción AND obligatoria del
+    WHERE de la consulta EXTERNA: no bajo un OR, ni en la proyección/ORDER BY, ni
+    únicamente dentro de una subconsulta o JOIN ON. Fail-closed."""
+    where = main.args.get("where")
+    if where is None:
+        return False
+    return any(_is_practice_eq(c, practice_id) for c in _and_conjuncts(where.this))
 
 
 def _clamp_limit(select: exp.Select, cap: int) -> None:
@@ -83,11 +112,13 @@ def validate_select(
     for forbidden in _FORBIDDEN:
         if root.find(forbidden) is not None:
             return ValidationResult(False, sql, f"contiene {forbidden.__name__}")
+    if main.args.get("into") is not None:
+        return ValidationResult(False, sql, "SELECT INTO no permitido")
     tables = {t.name for t in root.find_all(exp.Table)}
     extra = tables - allowed_tables
     if extra:
         return ValidationResult(False, sql, f"tablas fuera de allow-list: {sorted(extra)}")
-    if not _has_practice_filter(root, practice_id):
-        return ValidationResult(False, sql, "falta filtro practice_id")
+    if not _has_tenant_scope(main, practice_id):
+        return ValidationResult(False, sql, "practice_id debe ser conjunción AND del WHERE externo")
     _clamp_limit(main, row_limit)
     return ValidationResult(True, root.sql(dialect="postgres"), "ok")

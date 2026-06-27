@@ -46,3 +46,33 @@ def test_injects_limit_when_missing() -> None:
 def test_clamps_limit_over_cap() -> None:
     r = _v(f"SELECT full_name FROM clients WHERE practice_id = '{PID}' LIMIT 9999")
     assert r.ok and "9999" not in r.sql
+
+
+def test_rejects_practice_filter_under_or() -> None:
+    assert not _v(f"SELECT * FROM clients WHERE practice_id = '{PID}' OR 1=1").ok
+
+
+def test_rejects_practice_filter_in_projection_without_where() -> None:
+    assert not _v(f"SELECT full_name, practice_id = '{PID}' AS mine FROM clients").ok
+
+
+def test_rejects_practice_filter_only_in_join_on() -> None:
+    assert not _v(f"SELECT a.id FROM appointments a JOIN clients c ON c.practice_id = '{PID}'").ok
+
+
+def test_accepts_practice_filter_as_and_conjunct() -> None:
+    r = _v(f"SELECT count(*) FROM appointments WHERE start_at >= now() AND practice_id = '{PID}'")
+    assert r.ok
+
+
+def test_accepts_join_with_outer_practice_filter() -> None:
+    r = _v(
+        "SELECT p.full_name FROM appointments a "
+        "JOIN practitioners p ON a.practitioner_id = p.id "
+        f"WHERE a.practice_id = '{PID}'"
+    )
+    assert r.ok
+
+
+def test_rejects_select_into() -> None:
+    assert not _v(f"SELECT full_name INTO appointments FROM clients WHERE practice_id = '{PID}'").ok
