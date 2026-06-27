@@ -1,3 +1,4 @@
+import re
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -36,10 +37,6 @@ class SqlResult:
     columns: list[str] = field(default_factory=list)
     abstained: bool = False
     reason: str = ""
-
-
-class SqlDraft(BaseModel):
-    sql: str
 
 
 class SqlIntentVerdict(BaseModel):
@@ -130,6 +127,22 @@ def validate_select(
     return ValidationResult(True, root.sql(dialect="postgres"), "ok")
 
 
+_SQL_FENCE = re.compile(r"```(?:sql)?\s*(.*?)```", re.DOTALL | re.IGNORECASE)
+
+
+def _extract_sql(content: str) -> str:
+    """El 12b emite el SELECT como TEXTO PLANO (Gemma local devuelve None con
+    tool-calling/structured-output para texto libre); a veces lo envuelve en un
+    bloque ```sql. Tomamos el contenido crudo y lo dejamos listo para validar con
+    sqlglot, que ES la decodificación restringida real de esta ruta (CLAUDE.md §4)
+    — no hay regex sobre JSON, el validador hace el control estructural."""
+    s = (content or "").strip()
+    m = _SQL_FENCE.search(s)
+    if m:
+        s = m.group(1).strip()
+    return s.rstrip(";").strip()
+
+
 def _gen_messages(
     question: str, layer: SemanticLayer, practice_id: str, feedback: str
 ) -> list[tuple[str, str]]:
@@ -155,7 +168,11 @@ def _gen_messages(
 def _judge_messages(question: str, sql: str) -> list[tuple[str, str]]:
     system = (
         "Sos un juez. Decidí si la consulta SQL responde la intención de la pregunta. "
-        "matches=true solo si el SELECT devuelve exactamente lo que se pidió."
+        "IMPORTANTE: el SQL SIEMPRE incluye un filtro `practice_id = '...'` y una cláusula "
+        "`LIMIT` por política OBLIGATORIA del sistema (aislamiento multi-tenant y cota de filas). "
+        "NO los penalices ni los trates como 'de más': son correctos por diseño y no provienen de "
+        "la pregunta. Juzgá únicamente si el SELECT (métricas, agregaciones, columnas y los "
+        "filtros que provienen de la pregunta) responde lo que se pidió. matches=true si responde."
     )
     return [("system", system), ("human", f"Pregunta: {question}\n\nSQL:\n{sql}")]
 
@@ -170,9 +187,7 @@ async def answer_structured(
 ) -> SqlResult:
     settings = get_settings()
     layer = await load_semantic_layer(pool)
-    gen = (gen_llm or make_llm(settings.ollama_model, temperature=0.0)).with_structured_output(
-        SqlDraft
-    )
+    gen_llm = gen_llm or make_llm(settings.ollama_model, temperature=0.0)
     judge = (judge_llm or make_llm("gemma4:e4b", temperature=0.0)).with_structured_output(
         SqlIntentVerdict
     )
@@ -180,12 +195,9 @@ async def answer_structured(
     last_reason = "sin intentos"
     for _ in range(settings.sql_max_attempts):
         try:
-            draft: SqlDraft = await gen.ainvoke(
-                _gen_messages(question, layer, practice_id, feedback)
-            )
-            vr = validate_select(
-                draft.sql, layer.allowed_tables, practice_id, settings.sql_row_limit
-            )
+            response = await gen_llm.ainvoke(_gen_messages(question, layer, practice_id, feedback))
+            raw_sql = _extract_sql(getattr(response, "content", "") or "")
+            vr = validate_select(raw_sql, layer.allowed_tables, practice_id, settings.sql_row_limit)
             if not vr.ok:
                 last_reason = vr.reason
                 feedback = f"SQL inválido: {vr.reason}. Corregilo."

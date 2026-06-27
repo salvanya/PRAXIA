@@ -1,5 +1,5 @@
 from app.agents import sql_agent
-from app.agents.sql_agent import SqlDraft, SqlIntentVerdict
+from app.agents.sql_agent import SqlIntentVerdict
 from app.semantic_layer.resolver import SemanticLayer
 
 PID = "00000000-0000-0000-0000-000000000001"
@@ -10,6 +10,26 @@ LAYER = SemanticLayer(
     allowed_tables=frozenset({"appointments", "clients", "practitioners"}),
     allowed_columns={"appointments": frozenset({"practice_id", "start_at", "status"})},
 )
+
+
+class _Msg:
+    def __init__(self, content: str) -> None:
+        self.content = content
+
+
+class FakeGenLLM:
+    """gen_llm: el generador devuelve el SELECT como TEXTO PLANO en .content
+    (Gemma local no emite tool-call para texto libre). Cada ainvoke avanza al
+    siguiente contenido para ejercitar el retry."""
+
+    def __init__(self, *contents: str) -> None:
+        self._contents = list(contents)
+        self._i = 0
+
+    async def ainvoke(self, _messages):  # type: ignore[no-untyped-def]
+        c = self._contents[min(self._i, len(self._contents) - 1)]
+        self._i += 1
+        return _Msg(c)
 
 
 class _FakeStructured:
@@ -23,7 +43,10 @@ class _FakeStructured:
         return r
 
 
-class FakeLLM:
+class FakeJudgeLLM:
+    """judge_llm: mantiene salida estructurada (with_structured_output), que SÍ
+    funciona para el veredicto booleano del juez."""
+
     def __init__(self, *results) -> None:  # type: ignore[no-untyped-def]
         self._results = list(results)
 
@@ -47,8 +70,8 @@ async def test_happy_path_returns_rows(monkeypatch) -> None:
     result = await sql_agent.answer_structured(
         "¿cuántos turnos?",
         PID,
-        gen_llm=FakeLLM(SqlDraft(sql=GOOD_SQL)),
-        judge_llm=FakeLLM(SqlIntentVerdict(matches=True, reason="ok")),
+        gen_llm=FakeGenLLM(GOOD_SQL),
+        judge_llm=FakeJudgeLLM(SqlIntentVerdict(matches=True, reason="ok")),
     )
     assert not result.abstained
     assert result.rows == [{"total": 12}]
@@ -60,8 +83,8 @@ async def test_retries_after_invalid_sql(monkeypatch) -> None:
     result = await sql_agent.answer_structured(
         "¿cuántos turnos?",
         PID,
-        gen_llm=FakeLLM(SqlDraft(sql="INSERT INTO clients DEFAULT VALUES"), SqlDraft(sql=GOOD_SQL)),
-        judge_llm=FakeLLM(SqlIntentVerdict(matches=True, reason="ok")),
+        gen_llm=FakeGenLLM("INSERT INTO clients DEFAULT VALUES", GOOD_SQL),
+        judge_llm=FakeJudgeLLM(SqlIntentVerdict(matches=True, reason="ok")),
     )
     assert not result.abstained
     assert result.rows == [{"total": 12}]
@@ -72,8 +95,8 @@ async def test_abstains_after_cap(monkeypatch) -> None:
     result = await sql_agent.answer_structured(
         "algo",
         PID,
-        gen_llm=FakeLLM(SqlDraft(sql="INSERT INTO clients DEFAULT VALUES")),
-        judge_llm=FakeLLM(SqlIntentVerdict(matches=True, reason="ok")),
+        gen_llm=FakeGenLLM("INSERT INTO clients DEFAULT VALUES"),
+        judge_llm=FakeJudgeLLM(SqlIntentVerdict(matches=True, reason="ok")),
     )
     assert result.abstained
     assert result.sql is None
@@ -84,7 +107,8 @@ async def test_abstains_when_judge_rejects(monkeypatch) -> None:
     result = await sql_agent.answer_structured(
         "algo",
         PID,
-        gen_llm=FakeLLM(SqlDraft(sql=GOOD_SQL)),
-        judge_llm=FakeLLM(SqlIntentVerdict(matches=False, reason="no responde")),
+        gen_llm=FakeGenLLM(GOOD_SQL),
+        judge_llm=FakeJudgeLLM(SqlIntentVerdict(matches=False, reason="no responde")),
     )
     assert result.abstained
+    assert result.sql is None
