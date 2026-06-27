@@ -247,12 +247,20 @@ async def answer_structured(
 ) -> SqlResult
 ```
 
-### Generación (`gemma4:12b`, `with_structured_output(SqlDraft)`)
+### Generación (`gemma4:12b`, **texto plano** + validación sqlglot)
 Prompt (a mano, español) con: `schema_context`, `semantic_context`, el `practice_id` **literal**, y
 la pregunta. Instrucciones: **solo un `SELECT`** (sin comentarios, sin múltiples sentencias);
 **filtrá siempre por `practice_id = '<uuid>'`**; usá las métricas/dimensiones/glosario como guía;
-para "esta semana" usá `date_trunc('week', now())`. Decodificación restringida (CLAUDE.md §4:
-prohibido parsear con regex).
+para "esta semana" usá `date_trunc('week', now())`.
+
+> **Nota de implementación (post-build, commit `8a270bb`):** el diseño original generaba con
+> `with_structured_output(SqlDraft)`, pero el e2e reveló que **Gemma local devuelve `None`** por esa
+> vía: el 12b emite el `SELECT` como **texto plano** (sin tool-call), y `method="json_schema"`
+> *degrada* el SQL. Por eso la generación toma el `content` crudo (`_extract_sql`, que pela un bloque
+> ```` ```sql ```` y el `;` final) y lo pasa a `validate_select`. **`sqlglot` es la decodificación
+> restringida real de esta ruta** (CLAUDE.md §4: no hay regex sobre JSON; el validador hace el
+> control estructural). El **juez** y el **router** sí mantienen `with_structured_output` (el
+> veredicto booleano sí emite tool-call). `SqlDraft` se eliminó.
 
 ### Validación — `validate_select(sql, allowed_tables, practice_id) -> ValidationResult` (sqlglot)
 "No reinvento parser" (§0.3). Con `sqlglot` (dialecto `postgres`):

@@ -97,6 +97,7 @@ async def sql_node(state: AgentState) -> dict:
             write_token(piece)
         write_sources([])
     return {
+        "sources": [],
         "candidate_sql": result.sql or "",
         "judge_scores": {"sql_match": not result.abstained},
         "messages": [AIMessage(content=answer)],
