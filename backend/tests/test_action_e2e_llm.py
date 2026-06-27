@@ -21,13 +21,14 @@ async def test_create_appointment_confirm_writes_row() -> None:
     await seed_demo()
     pid = get_settings().practice_id
     client = (await db.find_clients_by_name(pid, "", limit=1))[0]
+    prac = (await db.list_active_practitioners(pid))[0]
 
     graph = build_graph(checkpointer=MemorySaver())
     config = {"configurable": {"thread_id": "e2e-confirm"}}
     before = await _count_appointments(pid)
     await graph.ainvoke(
         new_state(
-            f"agendá un turno para {client['full_name']} mañana a las 10",
+            f"agendá un turno para {client['full_name']} con {prac['full_name']} mañana a las 10",
             pid,
             "e2e-confirm",
         ),
@@ -47,13 +48,20 @@ async def test_create_appointment_cancel_writes_nothing() -> None:
     await seed_demo()
     pid = get_settings().practice_id
     client = (await db.find_clients_by_name(pid, "", limit=1))[0]
+    prac = (await db.list_active_practitioners(pid))[0]
 
     graph = build_graph(checkpointer=MemorySaver())
     config = {"configurable": {"thread_id": "e2e-cancel"}}
     before = await _count_appointments(pid)
     await graph.ainvoke(
-        new_state(f"agendá un turno para {client['full_name']} mañana a las 10", pid, "e2e-cancel"),
+        new_state(
+            f"agendá un turno para {client['full_name']} con {prac['full_name']} mañana a las 10",
+            pid,
+            "e2e-cancel",
+        ),
         config,
     )
+    snap = await graph.aget_state(config)
+    assert snap.next == ("confirm_appointment",)  # se abrió la confirmación
     await graph.ainvoke(Command(resume="cancel"), config)
     assert await _count_appointments(pid) == before
