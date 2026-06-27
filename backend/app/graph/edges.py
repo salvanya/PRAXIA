@@ -2,7 +2,7 @@ from app.graph.state import AgentState
 
 _INTENT_TO_NODE = {
     "rag": "rag",
-    "sql": "sql_stub",
+    "sql": "sql_node",
     "action": "action_stub",
     "chitchat": "chitchat",
     "out_of_scope": "scope_reject",

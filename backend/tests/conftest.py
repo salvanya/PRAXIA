@@ -5,6 +5,7 @@ import pytest
 
 from app import db, vectorstore
 from app.config import get_settings
+from app.semantic_layer import resolver as _resolver
 
 # Load .env into the environment for tests if present.
 env_path = Path(__file__).resolve().parents[2] / ".env"
@@ -38,4 +39,5 @@ async def _reset_async_singletons():
     if vectorstore._client is not None:
         await vectorstore._client.close()
         vectorstore._client = None
+    _resolver._cache = None
     get_settings.cache_clear()

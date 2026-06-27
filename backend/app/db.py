@@ -82,3 +82,22 @@ async def list_documents(practice_id: str) -> list[dict[str, Any]]:
         practice_id,
     )
     return [dict(r) for r in rows]
+
+
+async def run_select(
+    sql: str, *, timeout_ms: int, row_limit: int
+) -> tuple[list[dict[str, Any]], list[str]]:
+    """Ejecuta un SELECT ya validado en una transacción READ ONLY.
+
+    Defensa en profundidad: aunque la validación fallara, la transacción no
+    puede escribir. `statement_timeout` corta queries lentas; las filas se
+    recortan a `row_limit`.
+    """
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.transaction(readonly=True):
+            await conn.execute(f"SET LOCAL statement_timeout = {int(timeout_ms)}")
+            records = await conn.fetch(sql)
+    rows = [dict(r) for r in records[:row_limit]]
+    columns = list(rows[0].keys()) if rows else []
+    return rows, columns

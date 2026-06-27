@@ -44,9 +44,31 @@ async def test_scope_reject_streams_fixed_message_no_sources():
     assert sources == []
 
 
-async def test_sql_stub_streams_not_available():
-    tokens, sources = await _run(nodes.sql_stub, new_state("cuántos turnos", "p", "t"))
-    assert tokens == nodes.STUB_MESSAGE
+async def test_sql_node_emits_synthesized_answer(monkeypatch):
+    from app.agents.sql_agent import SqlResult
+
+    async def _fake_answer(question, practice_id, **kw):
+        return SqlResult(sql="SELECT 1", rows=[{"total": 12}], columns=["total"])
+
+    async def _fake_synth(question, rows, columns, llm=None):
+        return "Tenés 12 turnos esta semana."
+
+    monkeypatch.setattr(nodes, "answer_structured", _fake_answer)
+    monkeypatch.setattr(nodes, "synthesize_sql_answer", _fake_synth)
+    tokens, sources = await _run(nodes.sql_node, new_state("¿cuántos turnos?", "p", "t"))
+    assert tokens == "Tenés 12 turnos esta semana."
+    assert sources == []
+
+
+async def test_sql_node_abstains_with_no_sources(monkeypatch):
+    from app.agents.sql_agent import SqlResult
+
+    async def _fake_answer(question, practice_id, **kw):
+        return SqlResult(sql=None, abstained=True, reason="x")
+
+    monkeypatch.setattr(nodes, "answer_structured", _fake_answer)
+    tokens, sources = await _run(nodes.sql_node, new_state("algo raro", "p", "t"))
+    assert tokens == nodes.SQL_ABSTAIN_MESSAGE
     assert sources == []
 
 

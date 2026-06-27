@@ -5,7 +5,7 @@ from app.rag.synthesize import ABSTAIN_MESSAGE
 
 def test_route_maps_intents_to_nodes():
     assert edges.route({"intent": "rag"}) == "rag"  # type: ignore[arg-type]
-    assert edges.route({"intent": "sql"}) == "sql_stub"  # type: ignore[arg-type]
+    assert edges.route({"intent": "sql"}) == "sql_node"  # type: ignore[arg-type]
     assert edges.route({"intent": "action"}) == "action_stub"  # type: ignore[arg-type]
     assert edges.route({"intent": "chitchat"}) == "chitchat"  # type: ignore[arg-type]
     assert edges.route({"intent": "out_of_scope"}) == "scope_reject"  # type: ignore[arg-type]
@@ -32,9 +32,19 @@ async def _aval(value):
     return value
 
 
-async def test_graph_routes_sql_to_stub(monkeypatch):
+async def test_graph_routes_sql_to_node(monkeypatch):
+    from app.agents.sql_agent import SqlResult
+
+    async def _fake_answer(question, practice_id, **kw):
+        return SqlResult(sql="SELECT 1", rows=[{"total": 3}], columns=["total"])
+
+    async def _fake_synth(question, rows, columns, llm=None):
+        return "Tenés 3 turnos."
+
+    monkeypatch.setattr(nodes, "answer_structured", _fake_answer)
+    monkeypatch.setattr(nodes, "synthesize_sql_answer", _fake_synth)
     tokens, sources = await _run_full(monkeypatch, "¿cuántos turnos?", "sql")
-    assert tokens == nodes.STUB_MESSAGE
+    assert tokens == "Tenés 3 turnos."
     assert sources == []
 
 
@@ -61,7 +71,7 @@ def test_every_intent_maps_to_a_real_node():
     # Anti-drift: si un slice futuro agrega un intent a INTENTS pero olvida
     # mapearlo en _INTENT_TO_NODE, esto falla en vez de rutear silenciosamente
     # a scope_reject.
-    valid_nodes = {"rag", "chitchat", "scope_reject", "sql_stub", "action_stub"}
+    valid_nodes = {"rag", "chitchat", "scope_reject", "sql_node", "action_stub"}
     for intent in router.INTENTS:
         assert intent in edges._INTENT_TO_NODE, f"intent sin mapear: {intent}"
         assert edges._INTENT_TO_NODE[intent] in valid_nodes
