@@ -530,3 +530,19 @@ saliente fuera de Ollama/Postgres/Qdrant locales (DoD §6.5).
   Fase 4 es el cierre real.
 - **Checkpoints huérfanos** (tarjeta abierta y nunca confirmada): no escriben nada; TTL/limpieza de
   threads = mantenimiento posterior, no bloquea.
+
+## Addendum — desviación durante implementación (2026-06-28, aprobada por el usuario)
+
+**El router recibió un fix de robustez (mecanismo, no rol).** El e2e `-m llm` de este slice detectó
+que `with_structured_output(RouterDecision)` en `gemma4:e4b` devuelve `None` de forma **intermitente**
+(~1/3 en una de las frases de acción "registrá…"), lo que hacía que el router original
+(`return decision.intent`) crasheara intermitentemente (`AttributeError` sobre `None`) en frases de
+acción — un bug latente que además volvía flaky al propio e2e. Se cambió `classify_intent` a **`ainvoke`
++ parseo de texto** (match exacto y luego substring; reintento 1 vez; fallback seguro a `chitchat`),
+exactamente el patrón que el contrato ya prescribe (CLAUDE.md, gotcha de structured-output en Gemma
+local) y que el Data Agent usa para la generación de SQL.
+
+Esto **no contradice** la decisión de diseño "el router queda grueso": su *rol* sigue intacto (clasifica
+solo el dominio en 5 intenciones; no conoce las write-tools, su prompt no crece con cada tool). Solo
+cambió el *mecanismo de decodificación*. Archivos tocados fuera del alcance original: `graph/router.py`
++ `tests/test_router.py` (fakes adaptados a `ainvoke`). Verificado: no-llm 151 + `-m llm` 4/4 verdes.
