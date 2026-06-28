@@ -1,5 +1,5 @@
 import { expect, test, vi } from "vitest";
-import { streamChat } from "./chatStream";
+import { resumeChat, streamChat } from "./chatStream";
 
 function sseResponse(chunks: string[]): Response {
   const encoder = new TextEncoder();
@@ -96,4 +96,35 @@ test("streamChat surfaces the server's friendly detail on 503", async () => {
   await expect(async () => {
     for await (const _ of streamChat("x")) { /* drain */ }
   }).rejects.toThrow(detail);
+});
+
+test("streamChat yields a confirm event with threadId and action", async () => {
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValue(sseResponse([
+    'event: confirm\ndata: {"thread_id":"t1","action":{"kind":"create_appointment","summary":"Crear turno: Ana","params":{}}}\n\n',
+    "event: done\ndata: [DONE]\n\n",
+  ])));
+
+  const events = [];
+  for await (const ev of streamChat("agendá")) events.push(ev);
+
+  expect(events).toEqual([
+    { type: "confirm", threadId: "t1", action: { kind: "create_appointment", summary: "Crear turno: Ana", params: {} } },
+    { type: "done" },
+  ]);
+});
+
+test("resumeChat posts thread_id and decision to /api/chat/resume", async () => {
+  const fetchMock = vi.fn().mockResolvedValue(sseResponse([
+    "event: token\ndata: ✅\n\nevent: done\ndata: [DONE]\n\n",
+  ]));
+  vi.stubGlobal("fetch", fetchMock);
+
+  const events = [];
+  for await (const ev of resumeChat("t1", "confirm")) events.push(ev);
+
+  expect(fetchMock).toHaveBeenCalledWith("/api/chat/resume", expect.objectContaining({
+    method: "POST",
+    body: JSON.stringify({ thread_id: "t1", decision: "confirm" }),
+  }));
+  expect(events).toEqual([{ type: "token", text: "✅" }, { type: "done" }]);
 });

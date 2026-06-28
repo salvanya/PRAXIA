@@ -1,0 +1,40 @@
+import json
+from types import SimpleNamespace
+
+from app.main import _sse_event_stream
+
+
+class _FakeGraph:
+    def __init__(self, items):  # type: ignore[no-untyped-def]
+        self._items = items
+
+    def astream(self, inp, config, *, stream_mode):  # type: ignore[no-untyped-def]
+        assert stream_mode == ["custom", "updates"], stream_mode
+
+        async def gen():  # type: ignore[no-untyped-def]
+            for it in self._items:
+                yield it
+
+        return gen()
+
+
+async def test_stream_translates_token_sources_confirm_done() -> None:
+    action = {"kind": "create_appointment", "summary": "Crear turno: Ana", "params": {}}
+    graph = _FakeGraph(
+        [
+            ("custom", {"kind": "token", "text": "hola"}),
+            ("custom", {"kind": "sources", "sources": []}),
+            ("updates", {"propose_appointment": {"proposed_action": action}}),  # ignorado
+            ("updates", {"__interrupt__": (SimpleNamespace(value=action),)}),
+        ]
+    )
+    config = {"configurable": {"thread_id": "t1"}}
+    events = [e async for e in _sse_event_stream(graph, None, config)]
+
+    assert {"event": "token", "data": "hola"} in events
+    assert {"event": "sources", "data": "[]"} in events
+    confirm = next(e for e in events if e["event"] == "confirm")
+    payload = json.loads(confirm["data"])
+    assert payload["thread_id"] == "t1"
+    assert payload["action"] == action
+    assert events[-1] == {"event": "done", "data": "[DONE]"}

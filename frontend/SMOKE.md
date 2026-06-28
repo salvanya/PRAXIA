@@ -11,3 +11,13 @@ Prerequisitos: `docker compose up -d` (Postgres+Qdrant) y Ollama corriendo con e
    - Preguntá algo no cubierto: "¿cuál es la dirección de la clínica?" → mensaje de abstención.
 
 Sin Ollama: los pasos de ingesta y el streaming SSE igual funcionan; el chat devolverá el mensaje de abstención (no hay LLM para sintetizar), lo que valida todo el cableado UI↔backend salvo la síntesis real.
+
+- **Acción de escritura (HITL):** escribí `agendá un turno para <nombre de un cliente> con <nombre de un profesional> mañana a las 10`.
+  El seed demo crea 3 profesionales activos (e.g. Amparo Paez Rodriguez, Benjamin Perez Diaz, Martina Gomez) — **nombrá uno** en el mensaje.
+  Esperado: aparece una **tarjeta de confirmación** con el resumen del turno (cliente, profesional,
+  fecha/hora) y botones **Confirmar / Cancelar**.
+  - **Confirmar** → recibo `✅ Turno creado: …`. Verificá en la DB:
+    `docker compose exec -T postgres psql -U praxia -d praxia -c "SELECT client_id, start_at, status FROM appointments ORDER BY created_at DESC LIMIT 1;"`
+  - **Cancelar** → `Cancelado, no creé el turno.` y la tabla `appointments` no crece.
+  - Si omitís el profesional (ej. `agendá un turno para <cliente> mañana a las 10`) el asistente **no abre tarjeta** y responde cordialmente preguntando `¿Con qué profesional? Tenés: …` — comportamiento correcto, no un error.
+  - Pedido irresoluble (`agendá un turno para Zzz`) → abstención cordial, SIN tarjeta.

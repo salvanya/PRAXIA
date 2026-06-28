@@ -5,9 +5,16 @@ export interface Source {
   document_id: string;
 }
 
+export interface ProposedAction {
+  kind: string;
+  summary: string;
+  params: Record<string, unknown>;
+}
+
 export type ChatEvent =
   | { type: "token"; text: string }
   | { type: "sources"; sources: Source[] }
+  | { type: "confirm"; threadId: string; action: ProposedAction }
   | { type: "done" };
 
 function parseEvent(raw: string): ChatEvent | null {
@@ -20,25 +27,30 @@ function parseEvent(raw: string): ChatEvent | null {
   const data = dataLines.join("\n");
   if (event === "token") return { type: "token", text: data };
   if (event === "sources") return { type: "sources", sources: JSON.parse(data) as Source[] };
+  if (event === "confirm") {
+    const parsed = JSON.parse(data) as { thread_id: string; action: ProposedAction };
+    return { type: "confirm", threadId: parsed.thread_id, action: parsed.action };
+  }
   if (event === "done") return { type: "done" };
   return null;
 }
 
-export async function* streamChat(
-  message: string,
+async function* streamSSE(
+  url: string,
+  body: unknown,
   signal?: AbortSignal,
 ): AsyncGenerator<ChatEvent> {
-  const res = await fetch("/api/chat", {
+  const res = await fetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ message }),
+    body: JSON.stringify(body),
     signal,
   });
   if (!res.ok) {
     let detail = `chat failed: ${res.status}`;
     try {
-      const body = (await res.json()) as { detail?: string };
-      if (body?.detail) detail = body.detail;
+      const parsed = (await res.json()) as { detail?: string };
+      if (parsed?.detail) detail = parsed.detail;
     } catch {
       // cuerpo no-JSON: dejamos el mensaje por defecto
     }
@@ -63,4 +75,16 @@ export async function* streamChat(
       if (ev) yield ev;
     }
   }
+}
+
+export function streamChat(message: string, signal?: AbortSignal): AsyncGenerator<ChatEvent> {
+  return streamSSE("/api/chat", { message }, signal);
+}
+
+export function resumeChat(
+  threadId: string,
+  decision: "confirm" | "cancel",
+  signal?: AbortSignal,
+): AsyncGenerator<ChatEvent> {
+  return streamSSE("/api/chat/resume", { thread_id: threadId, decision }, signal);
 }

@@ -1,15 +1,18 @@
+from datetime import UTC, datetime
 from typing import Any
 
 from langchain_core.messages import AIMessage
 from langgraph.config import get_stream_writer
+from langgraph.types import interrupt
 
+from app.agents.action_agent import propose_appointment
 from app.agents.sql_agent import answer_structured
 from app.agents.sql_present import synthesize_sql_answer
 from app.config import get_settings
+from app.db import create_appointment
 from app.graph.rag_subgraph import crag_app, initial_rag_state
 from app.graph.state import AgentState, last_user_text
 
-STUB_MESSAGE = "Esa función todavía no está disponible (próximo slice)."
 SCOPE_MESSAGE = (
     "Solo puedo ayudarte con la información y los datos de tu práctica. "
     "¿Querés que busque algo en tus documentos o tu agenda?"
@@ -104,8 +107,47 @@ async def sql_node(state: AgentState) -> dict:
     }
 
 
-async def action_stub(state: AgentState) -> dict:
-    # TODO(write-slice): reemplazar el stub por interrupt + tarjeta de confirmación (CLAUDE.md §4).
-    write_token(STUB_MESSAGE)
+def _format_receipt(params: dict, row: dict) -> str:
+    start = datetime.fromisoformat(params["start_at"])
+    return (
+        f"✅ Turno creado: {params['client_name']} con {params['practitioner_name']} "
+        f"el {start.strftime('%d/%m %H:%M')} (UTC) (estado: {row['status']})."
+    )
+
+
+async def propose_appointment_node(state: AgentState) -> dict:
+    result = await propose_appointment(
+        last_user_text(state), state["practice_id"], now=datetime.now(UTC)
+    )
+    if result.abstained:
+        write_token(result.message)
+        write_sources([])
+        return {
+            "proposed_action": None,
+            "sources": [],
+            "messages": [AIMessage(content=result.message)],
+        }
+    return {"proposed_action": result.proposed_action}
+
+
+async def confirm_appointment_node(state: AgentState) -> dict:
+    action = state["proposed_action"] or {}
+    decision = interrupt(action)
+    if decision == "confirm":
+        params = action["params"]
+        row = await create_appointment(
+            state["practice_id"],
+            params["client_id"],
+            params["practitioner_id"],
+            datetime.fromisoformat(params["start_at"]),
+            datetime.fromisoformat(params["end_at"]),
+            reason=params.get("reason"),
+            channel=params.get("channel"),
+            status=params.get("status", "programado"),
+        )
+        msg = _format_receipt(params, row)
+    else:
+        msg = "Cancelado, no creé el turno."
+    write_token(msg)
     write_sources([])
-    return {"sources": [], "messages": [AIMessage(content=STUB_MESSAGE)]}
+    return {"sources": [], "messages": [AIMessage(content=msg)]}

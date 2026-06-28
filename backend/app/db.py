@@ -1,4 +1,5 @@
 import asyncio
+from datetime import datetime
 from typing import Any
 
 import asyncpg
@@ -101,3 +102,99 @@ async def run_select(
     rows = [dict(r) for r in records[:row_limit]]
     columns = list(rows[0].keys()) if rows else []
     return rows, columns
+
+
+async def find_clients_by_name(practice_id: str, name: str, *, limit: int) -> list[dict[str, Any]]:
+    pool = await get_pool()
+    rows = await pool.fetch(
+        """
+        SELECT id::text, full_name FROM clients
+        WHERE practice_id = $1 AND full_name ILIKE '%' || $2 || '%'
+        ORDER BY full_name LIMIT $3
+        """,
+        practice_id,
+        name,
+        limit,
+    )
+    return [dict(r) for r in rows]
+
+
+async def find_practitioners_by_name(
+    practice_id: str, name: str, *, limit: int
+) -> list[dict[str, Any]]:
+    pool = await get_pool()
+    rows = await pool.fetch(
+        """
+        SELECT id::text, full_name FROM practitioners
+        WHERE practice_id = $1 AND active AND full_name ILIKE '%' || $2 || '%'
+        ORDER BY full_name LIMIT $3
+        """,
+        practice_id,
+        name,
+        limit,
+    )
+    return [dict(r) for r in rows]
+
+
+async def list_active_practitioners(practice_id: str) -> list[dict[str, Any]]:
+    pool = await get_pool()
+    rows = await pool.fetch(
+        "SELECT id::text, full_name FROM practitioners "
+        "WHERE practice_id = $1 AND active ORDER BY full_name",
+        practice_id,
+    )
+    return [dict(r) for r in rows]
+
+
+async def create_appointment(
+    practice_id: str,
+    client_id: str,
+    practitioner_id: str,
+    start_at: datetime,
+    end_at: datetime,
+    *,
+    reason: str | None = None,
+    channel: str | None = None,
+    status: str = "programado",
+    created_by: str | None = None,
+) -> dict[str, Any]:
+    """Tool de escritura parametrizada. Verifica que client y practitioner sean
+    de la práctica (defensa en profundidad sobre el resolver) y recién inserta."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            ok_client = await conn.fetchval(
+                "SELECT EXISTS (SELECT 1 FROM clients WHERE id = $1 AND practice_id = $2)",
+                client_id,
+                practice_id,
+            )
+            ok_prac = await conn.fetchval(
+                "SELECT EXISTS (SELECT 1 FROM practitioners WHERE id = $1 AND practice_id = $2)",
+                practitioner_id,
+                practice_id,
+            )
+            if not (ok_client and ok_prac):
+                raise RuntimeError(
+                    "create_appointment: cliente/profesional fuera de la práctica o inexistente"
+                )
+            row = await conn.fetchrow(
+                """
+                INSERT INTO appointments
+                    (practice_id, client_id, practitioner_id, start_at, end_at,
+                     status, reason, channel, created_by)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+                RETURNING id::text, start_at, end_at, status
+                """,
+                practice_id,
+                client_id,
+                practitioner_id,
+                start_at,
+                end_at,
+                status,
+                reason,
+                channel,
+                created_by,
+            )
+    if row is None:
+        raise RuntimeError("create_appointment: la inserción no devolvió fila")
+    return dict(row)

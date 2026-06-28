@@ -72,9 +72,20 @@ async def test_sql_node_abstains_with_no_sources(monkeypatch):
     assert sources == []
 
 
-async def test_action_stub_streams_not_available():
-    tokens, sources = await _run(nodes.action_stub, new_state("agendá turno", "p", "t"))
-    assert tokens == nodes.STUB_MESSAGE
+async def test_propose_node_abstains_emits_message(monkeypatch):
+    from app.agents.action_agent import ProposalResult
+
+    async def _fake_propose(question, practice_id, *, now, gen_llm=None):
+        return ProposalResult(
+            proposed_action=None,
+            abstained=True,
+            message="No encontré al cliente.",
+            reason="client_not_found",
+        )
+
+    monkeypatch.setattr(nodes, "propose_appointment", _fake_propose)
+    tokens, sources = await _run(nodes.propose_appointment_node, new_state("agendá", "p", "t"))
+    assert tokens == "No encontré al cliente."
     assert sources == []
 
 

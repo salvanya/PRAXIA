@@ -1,14 +1,17 @@
 "use client";
 
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import { AssistantRuntimeProvider, Thread } from "@assistant-ui/react";
-import { useChatRuntime } from "../lib/runtime";
+import { useChatRuntime, type PendingAction } from "../lib/runtime";
 import { DropZone } from "../components/DropZone";
 import { DocumentList } from "../components/DocumentList";
+import { ConfirmCard } from "../components/ConfirmCard";
 
 export default function Home() {
-  const runtime = useChatRuntime();
   const [refreshKey, setRefreshKey] = useState(0);
+  const [pending, setPending] = useState<PendingAction | null>(null);
+  const onConfirm = useCallback((p: PendingAction) => setPending(p), []);
+  const runtime = useChatRuntime(onConfirm);
 
   return (
     <AssistantRuntimeProvider runtime={runtime}>
@@ -19,8 +22,17 @@ export default function Home() {
           <h2 style={{ fontSize: 14, marginTop: 16 }}>Documentos</h2>
           <DocumentList refreshKey={refreshKey} />
         </aside>
-        <section style={{ height: "100vh" }}>
-          <Thread />
+        <section style={{ height: "100vh", display: "flex", flexDirection: "column" }}>
+          <div style={{ flex: 1, minHeight: 0 }}>
+            <Thread />
+          </div>
+          {pending && (
+            <ConfirmCard
+              threadId={pending.threadId}
+              action={pending.action}
+              onClose={() => setPending(null)}
+            />
+          )}
         </section>
       </main>
     </AssistantRuntimeProvider>

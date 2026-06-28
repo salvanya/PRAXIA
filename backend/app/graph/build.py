@@ -3,10 +3,11 @@ from typing import Any
 
 from langgraph.graph import END, START, StateGraph
 
-from app.graph.edges import route
+from app.graph.edges import route, route_after_propose
 from app.graph.nodes import (
-    action_stub,
     chitchat_node,
+    confirm_appointment_node,
+    propose_appointment_node,
     rag_node,
     scope_reject_node,
     sql_node,
@@ -14,7 +15,7 @@ from app.graph.nodes import (
 from app.graph.router import router_node
 from app.graph.state import AgentState
 
-_LEAF_NODES = ("rag", "chitchat", "scope_reject", "sql_node", "action_stub")
+_LEAF_NODES = ("rag", "chitchat", "scope_reject", "sql_node", "confirm_appointment")
 
 
 def build_graph(checkpointer: Any = None) -> Any:
@@ -24,7 +25,8 @@ def build_graph(checkpointer: Any = None) -> Any:
     g.add_node("chitchat", chitchat_node)
     g.add_node("scope_reject", scope_reject_node)
     g.add_node("sql_node", sql_node)
-    g.add_node("action_stub", action_stub)
+    g.add_node("propose_appointment", propose_appointment_node)
+    g.add_node("confirm_appointment", confirm_appointment_node)
 
     g.add_edge(START, "router")
     g.add_conditional_edges(
@@ -35,8 +37,13 @@ def build_graph(checkpointer: Any = None) -> Any:
             "chitchat": "chitchat",
             "scope_reject": "scope_reject",
             "sql_node": "sql_node",
-            "action_stub": "action_stub",
+            "propose_appointment": "propose_appointment",
         },
+    )
+    g.add_conditional_edges(
+        "propose_appointment",
+        route_after_propose,
+        {"confirm_appointment": "confirm_appointment", END: END},
     )
     for node in _LEAF_NODES:
         g.add_edge(node, END)
@@ -46,5 +53,7 @@ def build_graph(checkpointer: Any = None) -> Any:
 
 @lru_cache
 def get_default_graph() -> Any:
-    """Grafo sin checkpointer (tests / fallback cuando el lifespan no corrió)."""
+    """Grafo sin checkpointer (tests / fallback cuando el lifespan no corrió).
+    Nota: el camino de escritura (interrupt) requiere checkpointer; en runtime
+    real lo provee el lifespan (AsyncPostgresSaver)."""
     return build_graph(checkpointer=None)
