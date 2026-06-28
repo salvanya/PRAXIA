@@ -5,11 +5,10 @@ from langchain_core.messages import AIMessage
 from langgraph.config import get_stream_writer
 from langgraph.types import interrupt
 
-from app.agents.action_agent import propose_appointment
 from app.agents.sql_agent import answer_structured
 from app.agents.sql_present import synthesize_sql_answer
+from app.agents.write_tools import REGISTRY, classify_write_action
 from app.config import get_settings
-from app.db import create_appointment
 from app.graph.rag_subgraph import crag_app, initial_rag_state
 from app.graph.state import AgentState, last_user_text
 
@@ -107,18 +106,21 @@ async def sql_node(state: AgentState) -> dict:
     }
 
 
-def _format_receipt(params: dict, row: dict) -> str:
-    start = datetime.fromisoformat(params["start_at"])
-    return (
-        f"✅ Turno creado: {params['client_name']} con {params['practitioner_name']} "
-        f"el {start.strftime('%d/%m %H:%M')} (UTC) (estado: {row['status']})."
-    )
-
-
-async def propose_appointment_node(state: AgentState) -> dict:
-    result = await propose_appointment(
-        last_user_text(state), state["practice_id"], now=datetime.now(UTC)
-    )
+async def propose_action_node(state: AgentState) -> dict:
+    question = last_user_text(state)
+    try:
+        kind = await classify_write_action(question)
+    except Exception:  # noqa: BLE001 - fail-closed: si el clasificador falla, no adivinamos
+        kind = "unsupported"
+    if kind not in REGISTRY:
+        msg = (
+            "Por ahora puedo agendar turnos o registrar interacciones. "
+            "¿Cuál de las dos necesitás?"
+        )
+        write_token(msg)
+        write_sources([])
+        return {"proposed_action": None, "sources": [], "messages": [AIMessage(content=msg)]}
+    result = await REGISTRY[kind].propose(question, state["practice_id"], now=datetime.now(UTC))
     if result.abstained:
         write_token(result.message)
         write_sources([])
@@ -130,24 +132,15 @@ async def propose_appointment_node(state: AgentState) -> dict:
     return {"proposed_action": result.proposed_action}
 
 
-async def confirm_appointment_node(state: AgentState) -> dict:
+async def confirm_action_node(state: AgentState) -> dict:
     action = state["proposed_action"] or {}
+    tool = REGISTRY[action["kind"]]
     decision = interrupt(action)
     if decision == "confirm":
-        params = action["params"]
-        row = await create_appointment(
-            state["practice_id"],
-            params["client_id"],
-            params["practitioner_id"],
-            datetime.fromisoformat(params["start_at"]),
-            datetime.fromisoformat(params["end_at"]),
-            reason=params.get("reason"),
-            channel=params.get("channel"),
-            status=params.get("status", "programado"),
-        )
-        msg = _format_receipt(params, row)
+        row = await tool.write(state["practice_id"], action["params"])
+        msg = tool.format_receipt(action["params"], row)
     else:
-        msg = "Cancelado, no creé el turno."
+        msg = tool.cancel_message
     write_token(msg)
     write_sources([])
     return {"sources": [], "messages": [AIMessage(content=msg)]}

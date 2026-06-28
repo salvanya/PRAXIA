@@ -198,3 +198,38 @@ async def create_appointment(
     if row is None:
         raise RuntimeError("create_appointment: la inserción no devolvió fila")
     return dict(row)
+
+
+async def log_interaction(
+    practice_id: str,
+    client_id: str,
+    *,
+    type: str,
+    summary: str | None = None,
+    content: str | None = None,
+    occurred_at: datetime,
+    source: str = "agente",
+) -> dict[str, Any]:
+    """Tool de escritura parametrizada: registra una interacción con un cliente.
+    Verifica que el cliente pertenezca a la práctica (defensa en profundidad sobre
+    el resolver) y recién inserta."""
+    pool = await get_pool()
+    row = await pool.fetchrow(
+        """
+        INSERT INTO interactions
+            (practice_id, client_id, type, summary, content, occurred_at, source)
+        SELECT $1, $2, $3, $4, $5, $6, $7
+        WHERE EXISTS (SELECT 1 FROM clients WHERE id = $2 AND practice_id = $1)
+        RETURNING id::text, occurred_at, type
+        """,
+        practice_id,
+        client_id,
+        type,
+        summary,
+        content,
+        occurred_at,
+        source,
+    )
+    if row is None:
+        raise RuntimeError("log_interaction: cliente fuera de la práctica o inexistente")
+    return dict(row)
