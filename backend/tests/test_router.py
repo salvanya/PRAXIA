@@ -1,23 +1,18 @@
 import pytest
+from langchain_core.messages import AIMessage
 
 from app.graph import router
 from app.graph.state import new_state
 
 
-class FakeStructured:
+class FakeRouterLLM:
+    """Plain-text fake matching the new classify_intent interface (no with_structured_output)."""
+
     def __init__(self, intent: str):
         self._intent = intent
 
     async def ainvoke(self, _messages):
-        return router.RouterDecision(intent=self._intent)
-
-
-class FakeRouterLLM:
-    def __init__(self, intent: str):
-        self._intent = intent
-
-    def with_structured_output(self, _schema):
-        return FakeStructured(self._intent)
+        return AIMessage(content=self._intent)
 
 
 async def test_classify_intent_returns_enum_value():
