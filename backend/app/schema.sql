@@ -81,3 +81,19 @@ CREATE TABLE IF NOT EXISTS appointments (
 );
 CREATE INDEX IF NOT EXISTS idx_appt_practice_date ON appointments(practice_id, start_at);
 CREATE INDEX IF NOT EXISTS idx_appt_client ON appointments(client_id);
+
+-- ====== Interacciones (el corazón del CRM de atención) ======
+CREATE TABLE IF NOT EXISTS interactions (
+    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    practice_id     UUID NOT NULL REFERENCES practices(id) ON DELETE CASCADE,
+    client_id       UUID NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
+    practitioner_id UUID REFERENCES practitioners(id),
+    appointment_id  UUID REFERENCES appointments(id),
+    type            TEXT NOT NULL CHECK (type IN ('sesion','llamada','email','nota','mensaje')),
+    summary         TEXT,
+    content         TEXT,
+    occurred_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+    source          TEXT NOT NULL DEFAULT 'manual' CHECK (source IN ('manual','agente','import')),
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_interactions_client ON interactions(client_id, occurred_at DESC);
