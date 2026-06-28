@@ -72,10 +72,24 @@ async def test_sql_node_abstains_with_no_sources(monkeypatch):
     assert sources == []
 
 
-async def test_propose_node_abstains_emits_message(monkeypatch):
+async def test_propose_action_unsupported_emits_capabilities(monkeypatch):
+    async def _clf(question, llm=None):
+        return "unsupported"
+
+    monkeypatch.setattr(nodes, "classify_write_action", _clf)
+    tokens, sources = await _run(nodes.propose_action_node, new_state("cancelá el turno", "p", "t"))
+    assert "agendar turnos" in tokens and "registrar interacciones" in tokens
+    assert sources == []
+
+
+async def test_propose_action_abstains_from_tool(monkeypatch):
+    from app.agents import write_tools
     from app.agents.action_agent import ProposalResult
 
-    async def _fake_propose(question, practice_id, *, now, gen_llm=None):
+    async def _clf(question, llm=None):
+        return "create_appointment"
+
+    async def _propose(question, practice_id, *, now, gen_llm=None):
         return ProposalResult(
             proposed_action=None,
             abstained=True,
@@ -83,9 +97,49 @@ async def test_propose_node_abstains_emits_message(monkeypatch):
             reason="client_not_found",
         )
 
-    monkeypatch.setattr(nodes, "propose_appointment", _fake_propose)
-    tokens, sources = await _run(nodes.propose_appointment_node, new_state("agendá", "p", "t"))
+    monkeypatch.setattr(nodes, "classify_write_action", _clf)
+    monkeypatch.setitem(
+        write_tools.REGISTRY,
+        "create_appointment",
+        write_tools.WriteTool(
+            kind="create_appointment",
+            propose=_propose,
+            write=write_tools._write_appointment,
+            format_receipt=write_tools.format_appointment_receipt,
+            cancel_message="x",
+        ),
+    )
+    tokens, sources = await _run(nodes.propose_action_node, new_state("agendá", "p", "t"))
     assert tokens == "No encontré al cliente."
+    assert sources == []
+
+
+async def test_propose_action_happy_returns_action_without_emitting(monkeypatch):
+    from app.agents import write_tools
+    from app.agents.action_agent import ProposalResult
+
+    action = {"kind": "create_appointment", "summary": "s", "params": {}}
+
+    async def _clf(question, llm=None):
+        return "create_appointment"
+
+    async def _propose(question, practice_id, *, now, gen_llm=None):
+        return ProposalResult(proposed_action=action, abstained=False, message="", reason="ok")
+
+    monkeypatch.setattr(nodes, "classify_write_action", _clf)
+    monkeypatch.setitem(
+        write_tools.REGISTRY,
+        "create_appointment",
+        write_tools.WriteTool(
+            kind="create_appointment",
+            propose=_propose,
+            write=write_tools._write_appointment,
+            format_receipt=write_tools.format_appointment_receipt,
+            cancel_message="x",
+        ),
+    )
+    tokens, sources = await _run(nodes.propose_action_node, new_state("agendá", "p", "t"))
+    assert tokens == ""  # camino feliz: no emite (la tarjeta sale del interrupt)
     assert sources == []
 
 

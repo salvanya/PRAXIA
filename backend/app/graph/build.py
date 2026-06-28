@@ -6,8 +6,8 @@ from langgraph.graph import END, START, StateGraph
 from app.graph.edges import route, route_after_propose
 from app.graph.nodes import (
     chitchat_node,
-    confirm_appointment_node,
-    propose_appointment_node,
+    confirm_action_node,
+    propose_action_node,
     rag_node,
     scope_reject_node,
     sql_node,
@@ -15,7 +15,7 @@ from app.graph.nodes import (
 from app.graph.router import router_node
 from app.graph.state import AgentState
 
-_LEAF_NODES = ("rag", "chitchat", "scope_reject", "sql_node", "confirm_appointment")
+_LEAF_NODES = ("rag", "chitchat", "scope_reject", "sql_node", "confirm_action")
 
 
 def build_graph(checkpointer: Any = None) -> Any:
@@ -25,8 +25,8 @@ def build_graph(checkpointer: Any = None) -> Any:
     g.add_node("chitchat", chitchat_node)
     g.add_node("scope_reject", scope_reject_node)
     g.add_node("sql_node", sql_node)
-    g.add_node("propose_appointment", propose_appointment_node)
-    g.add_node("confirm_appointment", confirm_appointment_node)
+    g.add_node("propose_action", propose_action_node)
+    g.add_node("confirm_action", confirm_action_node)
 
     g.add_edge(START, "router")
     g.add_conditional_edges(
@@ -37,13 +37,13 @@ def build_graph(checkpointer: Any = None) -> Any:
             "chitchat": "chitchat",
             "scope_reject": "scope_reject",
             "sql_node": "sql_node",
-            "propose_appointment": "propose_appointment",
+            "propose_action": "propose_action",
         },
     )
     g.add_conditional_edges(
-        "propose_appointment",
+        "propose_action",
         route_after_propose,
-        {"confirm_appointment": "confirm_appointment", END: END},
+        {"confirm_action": "confirm_action", END: END},
     )
     for node in _LEAF_NODES:
         g.add_edge(node, END)

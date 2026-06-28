@@ -6,7 +6,7 @@ from app.rag.synthesize import ABSTAIN_MESSAGE
 def test_route_maps_intents_to_nodes():
     assert edges.route({"intent": "rag"}) == "rag"  # type: ignore[arg-type]
     assert edges.route({"intent": "sql"}) == "sql_node"  # type: ignore[arg-type]
-    assert edges.route({"intent": "action"}) == "propose_appointment"  # type: ignore[arg-type]
+    assert edges.route({"intent": "action"}) == "propose_action"  # type: ignore[arg-type]
     assert edges.route({"intent": "chitchat"}) == "chitchat"  # type: ignore[arg-type]
     assert edges.route({"intent": "out_of_scope"}) == "scope_reject"  # type: ignore[arg-type]
 
@@ -71,7 +71,7 @@ def test_every_intent_maps_to_a_real_node():
     # Anti-drift: si un slice futuro agrega un intent a INTENTS pero olvida
     # mapearlo en _INTENT_TO_NODE, esto falla en vez de rutear silenciosamente
     # a scope_reject.
-    valid_nodes = {"rag", "chitchat", "scope_reject", "sql_node", "propose_appointment"}
+    valid_nodes = {"rag", "chitchat", "scope_reject", "sql_node", "propose_action"}
     for intent in router.INTENTS:
         assert intent in edges._INTENT_TO_NODE, f"intent sin mapear: {intent}"
         assert edges._INTENT_TO_NODE[intent] in valid_nodes
