@@ -1,40 +1,49 @@
 from datetime import UTC, datetime
 
+from langchain_core.messages import AIMessage
+
 from app.agents import write_tools
-from app.agents.write_tools import REGISTRY, WriteActionDecision, classify_write_action
+from app.agents.write_tools import REGISTRY, classify_write_action
 
 
-class _FakeStructured:
-    def __init__(self, value: WriteActionDecision) -> None:
-        self._value = value
+class FakeSeqLLM:
+    def __init__(self, *contents: str) -> None:
+        self._contents = list(contents)
+        self.calls = 0
 
     async def ainvoke(self, _messages):  # type: ignore[no-untyped-def]
-        return self._value
-
-
-class FakeClassifyLLM:
-    def __init__(self, kind: str) -> None:
-        self._kind = kind
-
-    def with_structured_output(self, _schema):  # type: ignore[no-untyped-def]
-        return _FakeStructured(WriteActionDecision(kind=self._kind))
+        c = self._contents[min(len(self._contents) - 1, self.calls)]
+        self.calls += 1
+        return AIMessage(content=c)
 
 
 async def test_classify_returns_kind() -> None:
     assert (
-        await classify_write_action(
-            "registrá que llamé a Ana", llm=FakeClassifyLLM("log_interaction")
-        )
+        await classify_write_action("registrá que llamé a Ana", llm=FakeSeqLLM("log_interaction"))
         == "log_interaction"
     )
     assert (
-        await classify_write_action("agendá un turno", llm=FakeClassifyLLM("create_appointment"))
+        await classify_write_action("agendá un turno", llm=FakeSeqLLM("create_appointment"))
         == "create_appointment"
     )
     assert (
-        await classify_write_action("cancelá el turno", llm=FakeClassifyLLM("unsupported"))
+        await classify_write_action("cancelá el turno", llm=FakeSeqLLM("unsupported"))
         == "unsupported"
     )
+
+
+async def test_classify_substring_retry_and_fallback() -> None:
+    # substring: el modelo envuelve la opción en una frase
+    assert (
+        await classify_write_action("x", llm=FakeSeqLLM("la acción es log_interaction"))
+        == "log_interaction"
+    )
+    # retry: respuesta no clara en el 1er intento, válida en el 2do
+    seq = FakeSeqLLM("mmm no sé", "create_appointment")
+    assert await classify_write_action("x", llm=seq) == "create_appointment"
+    assert seq.calls == 2
+    # fallback fail-closed: nunca devuelve una opción reconocible
+    assert await classify_write_action("x", llm=FakeSeqLLM("???")) == "unsupported"
 
 
 def test_registry_has_both_tools() -> None:
@@ -85,3 +94,36 @@ def test_interaction_receipt_is_deterministic() -> None:
     }
     msg = write_tools.format_interaction_receipt(params, {"id": "i1"})
     assert "✅" in msg and "llamada" in msg and "Ana López" in msg
+
+
+async def test_write_appointment_adapter_drops_display_keys(monkeypatch) -> None:
+    captured: dict = {}
+
+    async def _fake_create(practice_id, client_id, practitioner_id, start_at, end_at, **kw):  # type: ignore[no-untyped-def]
+        captured.update(
+            practice_id=practice_id,
+            client_id=client_id,
+            practitioner_id=practitioner_id,
+            start_at=start_at,
+            end_at=end_at,
+            **kw,
+        )
+        return {"id": "a1", "status": "programado"}
+
+    monkeypatch.setattr(write_tools.db, "create_appointment", _fake_create)
+    params = {
+        "client_id": "c1",
+        "client_name": "Ana López",
+        "practitioner_id": "p1",
+        "practitioner_name": "Dra. Gómez",
+        "start_at": "2026-06-30T10:00:00+00:00",
+        "end_at": "2026-06-30T10:30:00+00:00",
+        "reason": "control",
+        "channel": "presencial",
+        "status": "programado",
+    }
+    row = await write_tools._write_appointment("pid", params)
+    assert captured["client_id"] == "c1" and captured["practitioner_id"] == "p1"
+    assert captured["start_at"] == datetime(2026, 6, 30, 10, 0, tzinfo=UTC)  # ISO→datetime
+    assert "client_name" not in captured and "practitioner_name" not in captured
+    assert row["id"] == "a1"

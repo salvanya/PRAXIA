@@ -1,9 +1,7 @@
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, Literal
-
-from pydantic import BaseModel
+from typing import Any
 
 from app import db
 from app.agents.action_agent import ProposalResult, propose_appointment
@@ -81,9 +79,7 @@ REGISTRY: dict[str, WriteTool] = {
 }
 
 
-class WriteActionDecision(BaseModel):
-    kind: Literal["create_appointment", "log_interaction", "unsupported"]
-
+WRITE_KINDS: tuple[str, ...] = ("create_appointment", "log_interaction", "unsupported")
 
 CLASSIFY_PROMPT = (
     "Sos el despachador de acciones de escritura de un CRM de prácticas profesionales. "
@@ -105,9 +101,21 @@ def _classify_llm() -> Any:
 
 
 async def classify_write_action(question: str, llm: Any = None) -> str:
+    """Elige qué write-tool ejecutar (o 'unsupported').
+
+    Usa ainvoke + parseo de texto en vez de with_structured_output: en Gemma local
+    el structured output de e4b devuelve None de forma INTERMITENTE para ciertas
+    frases de acción (mismo gotcha que el router; ver CLAUDE.md). El prompt pide
+    responder solo con la opción, así que el parseo es fiable: se reintenta una vez
+    y se cae a 'unsupported' (fail-closed: no abre tarjeta, no escribe) si no decide.
+    """
     llm = llm or _classify_llm()
-    structured = llm.with_structured_output(WriteActionDecision)
-    decision: WriteActionDecision = await structured.ainvoke(
-        [("system", CLASSIFY_PROMPT), ("human", question)]
-    )
-    return decision.kind
+    for _ in range(2):  # reintento ante el None/respuesta vacía intermitente de e4b
+        result = await llm.ainvoke([("system", CLASSIFY_PROMPT), ("human", question)])
+        text = (getattr(result, "content", "") or "").strip().lower()
+        if text in WRITE_KINDS:  # caso esperado: el modelo responde solo la opción
+            return text
+        for kind in WRITE_KINDS:  # si la envolvió en una frase, buscá la keyword
+            if kind in text:
+                return kind
+    return "unsupported"  # fail-closed: no abre tarjeta, no escribe

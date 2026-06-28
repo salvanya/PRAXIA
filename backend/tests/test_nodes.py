@@ -201,3 +201,13 @@ async def test_rag_node_replays_long_answer_without_loss(monkeypatch):
     tokens, sources = await _run(nodes.rag_node, new_state("¿algo largo?", "p", "t"))
     assert tokens == answer
     assert sources == result["sources"]
+
+
+async def test_propose_action_classifier_exception_is_fail_closed(monkeypatch):
+    async def _boom(question, llm=None):
+        raise RuntimeError("classifier down")
+
+    monkeypatch.setattr(nodes, "classify_write_action", _boom)
+    tokens, sources = await _run(nodes.propose_action_node, new_state("agendá", "p", "t"))
+    assert "agendar turnos" in tokens  # cae a 'unsupported' → mensaje de capacidades, sin crash
+    assert sources == []
