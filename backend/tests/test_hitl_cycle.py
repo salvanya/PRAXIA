@@ -1,25 +1,23 @@
+import pytest
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import Command
 
+from app.agents import write_tools
 from app.agents.action_agent import ProposalResult
+from app.agents.write_tools import WriteTool
 from app.graph import edges, nodes
 from app.graph.state import AgentState, new_state
 
-ACTION = {
+APPOINTMENT = {
     "kind": "create_appointment",
     "summary": "Crear turno: Ana López con Dra. Gómez — 30/06 10:00–10:30",
-    "params": {
-        "client_id": "c1",
-        "client_name": "Ana López",
-        "practitioner_id": "p1",
-        "practitioner_name": "Dra. Gómez",
-        "start_at": "2026-06-30T10:00:00+00:00",
-        "end_at": "2026-06-30T10:30:00+00:00",
-        "reason": "control",
-        "channel": "presencial",
-        "status": "programado",
-    },
+    "params": {"client_id": "c1"},
+}
+INTERACTION = {
+    "kind": "log_interaction",
+    "summary": "Registrar llamada de Ana López — «confirmó el turno»",
+    "params": {"client_id": "c1"},
 }
 
 
@@ -35,46 +33,71 @@ class _Spy:
 
 def _hitl_graph():  # type: ignore[no-untyped-def]
     g = StateGraph(AgentState)
-    g.add_node("propose_appointment", nodes.propose_appointment_node)
-    g.add_node("confirm_appointment", nodes.confirm_appointment_node)
-    g.add_edge(START, "propose_appointment")
+    g.add_node("propose_action", nodes.propose_action_node)
+    g.add_node("confirm_action", nodes.confirm_action_node)
+    g.add_edge(START, "propose_action")
     g.add_conditional_edges(
-        "propose_appointment",
+        "propose_action",
         edges.route_after_propose,
-        {"confirm_appointment": "confirm_appointment", END: END},
+        {"confirm_action": "confirm_action", END: END},
     )
-    g.add_edge("confirm_appointment", END)
+    g.add_edge("confirm_action", END)
     return g.compile(checkpointer=MemorySaver())
 
 
-async def _fake_propose(question, practice_id, *, now, gen_llm=None):  # type: ignore[no-untyped-def]
-    return ProposalResult(proposed_action=ACTION, abstained=False, message="", reason="ok")
+def _install(monkeypatch, kind, action, write_spy):  # type: ignore[no-untyped-def]
+    async def _clf(question, llm=None):  # type: ignore[no-untyped-def]
+        return kind
+
+    async def _propose(question, practice_id, *, now, gen_llm=None):  # type: ignore[no-untyped-def]
+        return ProposalResult(proposed_action=action, abstained=False, message="", reason="ok")
+
+    monkeypatch.setattr(nodes, "classify_write_action", _clf)
+    monkeypatch.setitem(
+        write_tools.REGISTRY,
+        kind,
+        WriteTool(
+            kind=kind,
+            propose=_propose,
+            write=write_spy,
+            format_receipt=lambda params, row: "✅ ok",
+            cancel_message="cancelado",
+        ),
+    )
 
 
-async def test_confirm_writes_appointment_exactly_once(monkeypatch) -> None:
-    spy = _Spy({"id": "appt-1", "status": "programado"})
-    monkeypatch.setattr(nodes, "propose_appointment", _fake_propose)
-    monkeypatch.setattr(nodes, "create_appointment", spy)
+@pytest.mark.parametrize(
+    "kind,action",
+    [("create_appointment", APPOINTMENT), ("log_interaction", INTERACTION)],
+)
+async def test_confirm_writes_exactly_once(monkeypatch, kind, action) -> None:
+    spy = _Spy({"id": "row-1", "status": "programado", "occurred_at": None, "type": "llamada"})
+    _install(monkeypatch, kind, action, spy)
     graph = _hitl_graph()
-    config = {"configurable": {"thread_id": "t-confirm"}}
+    tid = f"t-confirm-{kind}"
+    config = {"configurable": {"thread_id": tid}}
 
-    await graph.ainvoke(new_state("agendá a Ana mañana 10", "pid", "t-confirm"), config)
+    await graph.ainvoke(new_state("hacé algo", "pid", tid), config)
     snap = await graph.aget_state(config)
-    assert snap.next == ("confirm_appointment",)
-    assert snap.tasks[0].interrupts[0].value["kind"] == "create_appointment"
-    assert spy.calls == []  # todavía no se escribió
+    assert snap.next == ("confirm_action",)
+    assert snap.tasks[0].interrupts[0].value["kind"] == kind
+    assert spy.calls == []  # nada escrito todavía
 
     await graph.ainvoke(Command(resume="confirm"), config)
     assert len(spy.calls) == 1  # se escribió UNA vez (sin recomputar la propuesta)
 
 
-async def test_cancel_writes_nothing(monkeypatch) -> None:
-    spy = _Spy({"id": "appt-1", "status": "programado"})
-    monkeypatch.setattr(nodes, "propose_appointment", _fake_propose)
-    monkeypatch.setattr(nodes, "create_appointment", spy)
+@pytest.mark.parametrize(
+    "kind,action",
+    [("create_appointment", APPOINTMENT), ("log_interaction", INTERACTION)],
+)
+async def test_cancel_writes_nothing(monkeypatch, kind, action) -> None:
+    spy = _Spy({"id": "row-1"})
+    _install(monkeypatch, kind, action, spy)
     graph = _hitl_graph()
-    config = {"configurable": {"thread_id": "t-cancel"}}
+    tid = f"t-cancel-{kind}"
+    config = {"configurable": {"thread_id": tid}}
 
-    await graph.ainvoke(new_state("agendá a Ana mañana 10", "pid", "t-cancel"), config)
+    await graph.ainvoke(new_state("hacé algo", "pid", tid), config)
     await graph.ainvoke(Command(resume="cancel"), config)
     assert spy.calls == []
