@@ -15,9 +15,7 @@ async def resolve_single_client(practice_id: str, name: str, *, limit: int) -> C
     """Resuelve un nombre a un único cliente de la práctica. Fail-closed: vacío /
     no encontrado / ambiguo → sin cliente y con mensaje de abstención cordial."""
     if not name.strip():
-        return ClientResolution(
-            None, "¿Sobre qué cliente es? Decime el nombre.", "client_missing"
-        )
+        return ClientResolution(None, "¿Sobre qué cliente es? Decime el nombre.", "client_missing")
     clients = await db.find_clients_by_name(practice_id, name, limit=limit)
     if not clients:
         return ClientResolution(
