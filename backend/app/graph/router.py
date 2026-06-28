@@ -30,21 +30,25 @@ def _router_llm() -> Any:
 
 
 async def classify_intent(message: str, llm: Any = None) -> str:
-    """Classify the user's message into one of INTENTS.
+    """Clasifica el mensaje del usuario en una de INTENTS.
 
-    Uses plain ainvoke + text parsing instead of with_structured_output because
-    gemma4 local returns None from structured output for certain phrases (known
-    CLAUDE.md gotcha). ROUTER_PROMPT instructs the model to respond with only the
-    intent keyword, so text-scanning is reliable.
+    Usa ainvoke + parseo de texto en vez de with_structured_output: en Gemma local
+    el structured output del router devuelve None de forma INTERMITENTE para ciertas
+    frases (gotcha documentado en CLAUDE.md; el SQL agent ya parsea texto por lo mismo).
+    El prompt pide responder solo con la intención, así que el parseo es fiable: se
+    reintenta una vez ante una respuesta vacía/no clara y se cae a 'chitchat' (respuesta
+    segura, no toca datos) si el modelo no decide.
     """
     llm = llm or _router_llm()
-    for _ in range(2):  # retry once on unclear response
+    for _ in range(2):  # reintento ante el None/respuesta vacía intermitente de e4b
         result = await llm.ainvoke([("system", ROUTER_PROMPT), ("human", message)])
         text = (getattr(result, "content", "") or "").strip().lower()
-        for intent in INTENTS:
+        if text in INTENTS:  # caso esperado: el modelo responde solo la intención
+            return text
+        for intent in INTENTS:  # si la envolvió en una frase, buscá la keyword
             if intent in text:
                 return intent
-    return "chitchat"  # safe fallback if model can't decide
+    return "chitchat"  # fallback seguro si el modelo no decide
 
 
 async def router_node(state: AgentState) -> dict:
