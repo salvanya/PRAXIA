@@ -178,12 +178,8 @@ async def test_abstains_when_no_practitioners(monkeypatch) -> None:
         clients=[{"id": "c1", "full_name": "Ana López"}],
         active_pracs=[],
     )
-    llm = FakeGenLLM(
-        ProposedAppointment(client_name="Ana", start_at="2026-06-30T10:00:00+00:00")
-    )
-    result = await action_agent.propose_appointment(
-        "agendá a Ana", "pid", now=NOW, gen_llm=llm
-    )
+    llm = FakeGenLLM(ProposedAppointment(client_name="Ana", start_at="2026-06-30T10:00:00+00:00"))
+    result = await action_agent.propose_appointment("agendá a Ana", "pid", now=NOW, gen_llm=llm)
     assert result.abstained
     assert result.reason == "no_practitioners"
 
@@ -210,11 +206,7 @@ async def test_abstains_when_client_name_empty(monkeypatch) -> None:
         clients=[{"id": "c1", "full_name": "Ana López"}],
         active_pracs=[{"id": "p1", "full_name": "Dra. Gómez"}],
     )
-    llm = FakeGenLLM(
-        ProposedAppointment(client_name="  ", start_at="2026-06-30T10:00:00+00:00")
-    )
-    result = await action_agent.propose_appointment(
-        "agendá el turno", "pid", now=NOW, gen_llm=llm
-    )
+    llm = FakeGenLLM(ProposedAppointment(client_name="  ", start_at="2026-06-30T10:00:00+00:00"))
+    result = await action_agent.propose_appointment("agendá el turno", "pid", now=NOW, gen_llm=llm)
     assert result.abstained
     assert result.reason == "client_missing"

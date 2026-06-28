@@ -104,9 +104,7 @@ async def run_select(
     return rows, columns
 
 
-async def find_clients_by_name(
-    practice_id: str, name: str, *, limit: int
-) -> list[dict[str, Any]]:
+async def find_clients_by_name(practice_id: str, name: str, *, limit: int) -> list[dict[str, Any]]:
     pool = await get_pool()
     rows = await pool.fetch(
         """
