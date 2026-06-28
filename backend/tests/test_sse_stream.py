@@ -9,6 +9,8 @@ class _FakeGraph:
         self._items = items
 
     def astream(self, inp, config, *, stream_mode):  # type: ignore[no-untyped-def]
+        assert stream_mode == ["custom", "updates"], stream_mode
+
         async def gen():  # type: ignore[no-untyped-def]
             for it in self._items:
                 yield it

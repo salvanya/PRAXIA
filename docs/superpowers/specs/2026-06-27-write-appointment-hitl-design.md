@@ -50,9 +50,7 @@ El gate de Fase 1 que cierra este slice (CLAUDE.md §2 / §6.3, Blueprint §6 cr
   pida la introspección del dev loop (§8) o prod. Razón: §7 "no construyas de más".
 - **Migración a `@assistant-ui/react-ui` + canvas rico** (tablas/fichas/citas): la tarjeta se hace
   **mínima funcional** sobre el `useLocalRuntime` actual. El canvas rico sigue diferido en Fase 1.
-- **Timezone por práctica**: MVP guarda en `appointments` (TIMESTAMPTZ) el instante absoluto que
-  computa el LLM a partir del `now` que le pasamos en UTC. tz-por-práctica y DST = endurecimiento
-  posterior. **La tarjeta HITL mitiga**: el humano ve la fecha/hora resuelta antes de confirmar.
+- **Timezone por práctica**: MVP guarda en `appointments` (TIMESTAMPTZ) el instante absoluto que computa el LLM a partir del `now` (UTC), y **la tarjeta y el recibo etiquetan la hora como `(UTC)`** para no inducir a error. Mostrar/almacenar en la hora local de la práctica + DST = endurecimiento posterior (Fase 4).
 - **Reprogramar / cancelar turnos existentes** (`update_appointment`): este slice solo **crea**.
 
 ## Principio rector

@@ -111,7 +111,7 @@ def _format_receipt(params: dict, row: dict) -> str:
     start = datetime.fromisoformat(params["start_at"])
     return (
         f"✅ Turno creado: {params['client_name']} con {params['practitioner_name']} "
-        f"el {start.strftime('%d/%m %H:%M')} (estado: {row['status']})."
+        f"el {start.strftime('%d/%m %H:%M')} (UTC) (estado: {row['status']})."
     )
 
 

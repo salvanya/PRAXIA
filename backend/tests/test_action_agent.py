@@ -109,3 +109,112 @@ async def test_abstains_on_bad_datetime(monkeypatch) -> None:
 def test_proposal_result_is_a_dataclass() -> None:
     r = ProposalResult(proposed_action=None, abstained=True, message="m", reason="r")
     assert r.abstained and r.message == "m"
+
+
+async def test_abstains_when_named_practitioner_not_found(monkeypatch) -> None:
+    _patch_db(
+        monkeypatch,
+        clients=[{"id": "c1", "full_name": "Ana López"}],
+        pracs_by_name=[],
+    )
+    llm = FakeGenLLM(
+        ProposedAppointment(
+            client_name="Ana",
+            practitioner_name="Dr. X",
+            start_at="2026-06-30T10:00:00+00:00",
+        )
+    )
+    result = await action_agent.propose_appointment(
+        "agendá a Ana con Dr. X", "pid", now=NOW, gen_llm=llm
+    )
+    assert result.abstained
+    assert result.reason == "practitioner_not_found"
+
+
+async def test_abstains_when_named_practitioner_ambiguous(monkeypatch) -> None:
+    _patch_db(
+        monkeypatch,
+        clients=[{"id": "c1", "full_name": "Ana López"}],
+        pracs_by_name=[{"id": "p1", "full_name": "Dr. A"}, {"id": "p2", "full_name": "Dr. B"}],
+    )
+    llm = FakeGenLLM(
+        ProposedAppointment(
+            client_name="Ana",
+            practitioner_name="Dr",
+            start_at="2026-06-30T10:00:00+00:00",
+        )
+    )
+    result = await action_agent.propose_appointment(
+        "agendá a Ana con Dr", "pid", now=NOW, gen_llm=llm
+    )
+    assert result.abstained
+    assert result.reason == "practitioner_ambiguous"
+
+
+async def test_happy_path_named_practitioner(monkeypatch) -> None:
+    _patch_db(
+        monkeypatch,
+        clients=[{"id": "c1", "full_name": "Ana López"}],
+        pracs_by_name=[{"id": "p9", "full_name": "Dra. Gómez"}],
+    )
+    llm = FakeGenLLM(
+        ProposedAppointment(
+            client_name="Ana",
+            practitioner_name="Gómez",
+            start_at="2026-06-30T10:00:00+00:00",
+        )
+    )
+    result = await action_agent.propose_appointment(
+        "agendá a Ana con Gómez", "pid", now=NOW, gen_llm=llm
+    )
+    assert not result.abstained
+    assert result.proposed_action is not None
+    assert result.proposed_action["params"]["practitioner_id"] == "p9"
+
+
+async def test_abstains_when_no_practitioners(monkeypatch) -> None:
+    _patch_db(
+        monkeypatch,
+        clients=[{"id": "c1", "full_name": "Ana López"}],
+        active_pracs=[],
+    )
+    llm = FakeGenLLM(
+        ProposedAppointment(client_name="Ana", start_at="2026-06-30T10:00:00+00:00")
+    )
+    result = await action_agent.propose_appointment(
+        "agendá a Ana", "pid", now=NOW, gen_llm=llm
+    )
+    assert result.abstained
+    assert result.reason == "no_practitioners"
+
+
+async def test_abstains_when_extract_fails(monkeypatch) -> None:
+    class _RaisingStructured:
+        async def ainvoke(self, _messages):  # type: ignore[no-untyped-def]
+            raise RuntimeError("boom")
+
+    class FakeRaisingLLM:
+        def with_structured_output(self, _schema):  # type: ignore[no-untyped-def]
+            return _RaisingStructured()
+
+    result = await action_agent.propose_appointment(
+        "agendá", "pid", now=NOW, gen_llm=FakeRaisingLLM()
+    )
+    assert result.abstained
+    assert result.reason == "extract_failed"
+
+
+async def test_abstains_when_client_name_empty(monkeypatch) -> None:
+    _patch_db(
+        monkeypatch,
+        clients=[{"id": "c1", "full_name": "Ana López"}],
+        active_pracs=[{"id": "p1", "full_name": "Dra. Gómez"}],
+    )
+    llm = FakeGenLLM(
+        ProposedAppointment(client_name="  ", start_at="2026-06-30T10:00:00+00:00")
+    )
+    result = await action_agent.propose_appointment(
+        "agendá el turno", "pid", now=NOW, gen_llm=llm
+    )
+    assert result.abstained
+    assert result.reason == "client_missing"

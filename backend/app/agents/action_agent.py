@@ -68,7 +68,7 @@ def _abstain(message: str, reason: str) -> ProposalResult:
 
 
 def _summary(params: dict[str, Any], start: datetime, end: datetime) -> str:
-    when = f"{start.strftime('%d/%m %H:%M')}–{end.strftime('%H:%M')}"
+    when = f"{start.strftime('%d/%m %H:%M')}–{end.strftime('%H:%M')} (UTC)"
     parts = [f"Crear turno: {params['client_name']} con {params['practitioner_name']} — {when}"]
     if params["reason"]:
         parts.append(f"motivo: {params['reason']}")
@@ -84,6 +84,12 @@ async def propose_appointment(
     extracted = await _extract(question, now, gen_llm)
     if extracted is None:
         return _abstain(GENERIC_MESSAGE, "extract_failed")
+
+    if not extracted.client_name.strip():
+        return _abstain(
+            "No me dijiste para qué cliente es el turno. ¿Me pasás el nombre?",
+            "client_missing",
+        )
 
     clients = await db.find_clients_by_name(
         practice_id, extracted.client_name, limit=settings.appt_name_match_limit
