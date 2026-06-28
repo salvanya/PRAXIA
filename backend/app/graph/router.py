@@ -45,6 +45,8 @@ async def classify_intent(message: str, llm: Any = None) -> str:
         text = (getattr(result, "content", "") or "").strip().lower()
         if text in INTENTS:  # caso esperado: el modelo responde solo la intención
             return text
+        # los INTENTS no son substrings entre sí; el orden solo importaría si el
+        # modelo devolviera varias intenciones (improbable: el prompt pide solo una)
         for intent in INTENTS:  # si la envolvió en una frase, buscá la keyword
             if intent in text:
                 return intent
