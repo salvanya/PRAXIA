@@ -10,38 +10,47 @@
 Vas a continuar el desarrollo de Praxia (CRM conversacional local-first). Antes de actuar:
 
 1. Leé `CLAUDE.md` (contrato operativo) y `Praxia_Blueprint.md` (diseño completo). Respetá el contrato: inferencia 100% local vía Ollama, costo $0, aislamiento multi-tenant por `practice_id` siempre, escrituras solo por tools con confirmación humana, y commits LIMPIOS sin ninguna atribución a Claude.
-2. Estamos en FASE 1 (MVP conversacional, alcance en CLAUDE.md §7). Ya están MERGEADOS a `main` y VALIDADOS (tests + smoke en navegador) TRES slices — NO los reabras:
+2. Estamos en FASE 1 (MVP conversacional, alcance en CLAUDE.md §7). Ya están MERGEADOS a `main` y VALIDADOS (tests + smoke en navegador) CUATRO slices — NO los reabras:
    - SLICE 1: grafo LangGraph + router semántico (merge ae46438).
-   - SLICE 2: subgrafo CRAG correctivo (merge d765eca + fix 7b0da07): retrieve → rerank (bge-reranker-v2-m3) → juez de relevancia → reformular/reintentar (cap 2) → síntesis buffered con citas → juez de groundedness → emitir o abstener. Fuentes SOLO en el camino grounded (cerró el bug de "abstención que muestra fuentes que no usó"). Spec/plan en docs/superpowers/{specs,plans}/2026-06-26-crag*.
-   - SLICE 3: Data Agent NL2SQL read-only (merge 8804a73 + fix 0821ed4): NL→`SELECT` con capa semántica (`semantic_layer/model.yaml`) → validación sqlglot (1 sentencia, SELECT-only, allow-list, `practice_id` como AND-conjunct del WHERE externo, rechazo SELECT INTO, LIMIT clamp) → juez intención↔SQL → retry cap 2 → abstención fail-closed → ejecutor read-only (tx READ ONLY + statement_timeout + tope filas) → síntesis grounded (números verbatim + tabla markdown). `sql_node` enchufado; **`action_stub` INTACTO**. Gotcha clave: `with_structured_output` devuelve None para la gen SQL en Gemma local → se genera por TEXTO PLANO + sqlglot (que ES la decodificación restringida real, §4). Spec/plan en docs/superpowers/{specs,plans}/2026-06-26-nl2sql*.
+   - SLICE 2: subgrafo CRAG correctivo (merge d765eca + fix 7b0da07): retrieve → rerank (bge-reranker-v2-m3) → juez de relevancia → reformular/reintentar (cap 2) → síntesis buffered con citas → juez de groundedness → emitir o abstener. Fuentes SOLO en el camino grounded. Spec/plan en docs/superpowers/{specs,plans}/2026-06-26-crag*.
+   - SLICE 3: Data Agent NL2SQL read-only (merge 8804a73 + fix 0821ed4): NL→`SELECT` con capa semántica → validación sqlglot (1 sentencia, SELECT-only, allow-list, `practice_id` AND-conjunct del WHERE externo, rechazo SELECT INTO, LIMIT clamp) → juez intención↔SQL → retry cap 2 → abstención fail-closed → ejecutor read-only (tx READ ONLY + statement_timeout + tope filas) → síntesis grounded. Gotcha: `with_structured_output` devuelve None para la gen SQL en Gemma local → TEXTO PLANO + sqlglot (decodificación restringida real, §4). Spec/plan en docs/superpowers/{specs,plans}/2026-06-26-nl2sql*.
+   - SLICE 4: write-tool `create_appointment` con human-in-the-loop (merge 8e0ccfd, 2026-06-28): reemplazó `action_stub`. DOS NODOS (clave): `propose_appointment` (LLM extrae args tipados `ProposedAppointment` + resolver determinístico nombre→UUID y fecha→ISO, scoped por `practice_id`, fail-closed) se CHECKPOINTEA; `confirm_appointment` hace `interrupt(proposed_action)` y al reanudar con `Command(resume="confirm"|"cancel")` escribe vía `db.create_appointment` (INSERT parametrizado + guard `EXISTS(... AND practice_id)`) o cancela. Separar en 2 nodos evita que el LLM se re-ejecute al reanudar (el interrupt re-corre el nodo desde arriba) → se escribe EXACTAMENTE lo confirmado. Transporte: `/chat` con `stream_mode=["custom","updates"]` emite evento SSE `confirm`; nuevo `POST /chat/resume` (determinístico, sin probe de Ollama). Front mínimo: `ConfirmCard` (Confirmar/Cancelar, recibo en la card) + `resumeChat`; `useChatRuntime(onConfirm?)`. Hora etiquetada `(UTC)`. Spec/plan en docs/superpowers/{specs,plans}/2026-06-27-write-appointment-hitl*.
 
-Estado y verificación (todo verde al cierre, 2026-06-27):
-- Gate no-llm: `backend\.venv\Scripts\python -m pytest backend/tests -m "not llm" -q` → **106 passed**. ruff OK. mypy: correr SIEMPRE con `--config-file backend/pyproject.toml` (sin eso, desde la raíz, da falso-positivo asyncpg [import-untyped]; con la config = limpio).
-- `-m llm` e2e verde (requiere Ollama + ambos modelos + Postgres/Qdrant + pesos de bge-reranker-v2-m3 ya descargados ~600MB).
-- **Smoke en navegador VALIDADO 7/7**: chitchat sin fuentes · ingesta protocolo.md indexado · CRAG con cita [1] · abstención SIN fuentes · "¿cuántos turnos esta semana?" → 20 reales · listado de clientes multi-tenant (seeder ahora con email/phone, commit 0821ed4) · acción de escritura → stub "próximo slice".
-- Infra: `docker compose up -d` (Postgres + Qdrant). Backend: `backend\.venv\Scripts\python backend\dev.py` (NO `python -m uvicorn` directo: ProactorEventLoop vs psycopg async del checkpointer). Frontend: `npm --prefix frontend run dev` (si :3000 lo tiene un node viejo, Next usa :3001). PowerShell NO soporta `cd x && y`. Si el navegador da "error 500": backend caído o front stale; `localhost` puede resolver a `::1`, el backend bindea `127.0.0.1`.
-- Ollama: `gemma4:12b` (síntesis) y `gemma4:e4b` (router/jueces) pulled. `main` local 55 commits adelante de origin/main (NO pusheado).
+Estado y verificación (todo verde al cierre, 2026-06-28):
+- Gate no-llm: `backend\.venv\Scripts\python -m pytest backend/tests -m "not llm" -q` → **130 passed**. ruff check + format OK. mypy SIEMPRE con `--config-file backend/pyproject.toml` (sin eso, falso-positivo asyncpg [import-untyped]).
+- `-m llm` e2e verde (requiere Ollama + ambos modelos + Postgres/Qdrant; bge-reranker ~600MB ya descargado): incluye `test_action_e2e_llm.py` (confirm escribe +1, cancel no escribe). Front: vitest 14/14 + lint + build.
+- **Smoke en navegador VALIDADO (HITL, 2026-06-28)**: tarjeta de confirmación → Confirmar escribe la fila (verificado en DB: 1 turno, Bautista Garcia/Martina Gomez); Cancelar y abstenciones (sin profesional con 3 activos / cliente inexistente / ambiguo) NO escriben. + lo previo (chitchat sin fuentes, SQL conteo real, listado, scope reject).
+- Infra: `docker compose up -d`. Backend: `backend\.venv\Scripts\python backend\dev.py` (NO `uvicorn` directo: ProactorEventLoop vs psycopg async del checkpointer). Frontend: `npm --prefix frontend run dev` (:3000/:3001). Seed: `backend\.venv\Scripts\python backend\seed_demo.py` (3 profesionales, 30 clientes, 80 turnos). PowerShell NO soporta `cd x && y`; backend bindea `127.0.0.1` (`localhost` puede ser `::1`).
+- Ollama: `gemma4:12b` (síntesis/extracción) y `gemma4:e4b` (router/jueces) pulled. `main` ya PUSHEADO a `origin` (github.com/salvanya/PRAXIA) al cierre de esta sesión.
 
 Tarea: arrancar el PRÓXIMO SLICE de Fase 1 con el flujo de siempre: brainstorming → spec → plan (writing-plans) → ejecución subagent-driven con review por tarea. No construyas de más; respetá el alcance por fase de CLAUDE.md §7.
 
 Punto de arranque a confirmar conmigo (preguntame ANTES de escribir código):
-- **Tools de escritura con human-in-the-loop** (reemplaza `action_stub`, RECOMENDADO — cierra el último stub del grafo): tools MCP parametrizadas (`create_appointment`, `log_interaction`) detrás de un `interrupt` de LangGraph con tarjeta de confirmación. Hay un TODO breadcrumb en `action_stub`. Nota: los args estructurados (bool/enum/ID) SÍ funcionan con structured output, a diferencia del texto-libre SQL.
+- **`log_interaction`** (RECOMENDADO — 2ª write-tool, fast-follow: la maquinaria HITL ya existe; reusás `propose_appointment_node`/`confirm_appointment_node` como patrón, solo otra tool parametrizada detrás del mismo `interrupt`). Requiere PORTAR la tabla `interactions` del blueprint (§5.2, "el corazón del CRM"; hoy NO existe en schema.sql).
 - **Guardrails** (Presidio PII español + inyección de prompt) en entrada/salida del grafo.
-- **Memoria de corto plazo real**: hoy `new_state` mintea un `uuid4` por request → el checkpointer Postgres no persiste multi-turno; falta que el front mande un `thread_id` estable.
+- **Memoria de corto plazo real**: hoy `new_state` mintea un `uuid4` por request → el checkpointer Postgres no persiste multi-turno; falta que el front mande un `thread_id` estable. (También habilita slot-filling: hoy la propuesta de turno es one-shot — si falta un dato, abstiene.)
 
-Hardening fichado (NO bloquea; traer cuando entre input no confiable o multi-tenant): denylist de funciones SQL peligrosas (`pg_read_file`/`pg_sleep`); per-tabla join scoping + RLS = Fase 4.
+Hardening fichado (NO bloquea): denylist de funciones SQL peligrosas (`pg_read_file`/`pg_sleep`); per-tabla join scoping + RLS = Fase 4; audit log (`agent_runs`) + `consents`; `created_by` en appointments (necesita auth real); timezone por práctica (hoy todo UTC, etiquetado en tarjeta/recibo).
 
-Ítems DIFERIDOS a Fase 1 (no son cleanup): migrar `<Thread>` a `@assistant-ui/react-ui` junto al canvas más rico (tablas/fichas/citas/tarjetas de confirmación); afinar el prompt del router con DSPy (Fase 2) contra un golden set — caso límite conocido: "¿atienden los domingos?" rutea a sql en vez de rag.
+Ítems DIFERIDOS a Fase 1: migrar `<Thread>` a `@assistant-ui/react-ui` + canvas rico (tablas/fichas/citas/tarjetas de confirmación); botón "Editar" en la tarjeta; afinar el prompt del router con DSPy (Fase 2) — caso límite conocido: "¿atienden los domingos?" rutea a sql en vez de rag.
 ```
 
 ---
 
 ## Contexto de referencia (para vos / la próxima sesión)
 
+### Cierre Slice 4 — write-tool create_appointment con HITL (2026-06-28)
+- **Slice 4 mergeado (`8e0ccfd`, `--no-ff`) y VALIDADO en navegador + DB.** Reemplazó `action_stub` por la 1ª tool de escritura con human-in-the-loop. 13 commits, autoría limpia. Spec/plan en `docs/superpowers/{specs,plans}/2026-06-27-write-appointment-hitl*`.
+- **Ejecución subagent-driven** (8 tareas TDD + 1 fix consolidado del review final). Review final whole-branch (opus): *Ready to merge YES* — verificó contra los internals reales de langgraph 0.2.76: no hay escritura sin confirmación; sin recompute de la propuesta al reanudar (2 nodos: `propose` checkpointeado + `confirm` con `interrupt`); idempotencia de doble-submit (`map_command`: el RESUME solo lo consume un interrupt pendiente); multi-tenant scoped en resolvers + guard `EXISTS` en el INSERT.
+- **Smoke navegador (HITL) validado:** Confirmar escribió la fila (verificado en DB — la tool crea con `reason`/`channel` NULL, así que `reason IS NULL` aísla lo creado por HITL: 1 fila, Bautista Garcia/Martina Gomez/2026-06-29 10:00 UTC/programado); Cancelar y las 3 abstenciones NO escribieron (total 81 = 80 seed + 1).
+- **Hallazgo de ejecución (T8):** el e2e inicial falló honestamente — el seed tiene **3 profesionales activos**, así que una frase sin profesional abstiene `practitioner_unspecified` (correcto, fail-closed) y nunca abre la tarjeta. Fix nombró un profesional → ejercita el HITL real y cubre la rama de profesional nombrado. Confirma la regla del Slice 3: structured output SÍ sirve para args tipados (bool/enum/str/ID), a diferencia del texto-libre SQL.
+- **Decisiones del slice:** `created_by` NULL (sin auth → Fase 4); hora mostrada/almacenada en UTC, etiquetada `(UTC)` en tarjeta/recibo (tz por práctica → Fase 4); tool **in-process** (no MCP server), cumple §4 en espíritu. Front mínimo funcional (recibo dentro de la `ConfirmCard`; el canvas rico + append al hilo siguen diferidos).
+- **`main` PUSHEADO a `origin`** (github.com/salvanya/PRAXIA) al cierre de esta sesión — 1ª publicación real (antes era local-first sin push). Datos del repo = sintéticos (Faker), `.env` gitignored.
+
 ### Cierre Slice 3 NL2SQL + validación Fase 1 en navegador (2026-06-27)
 - **Fase 1 VALIDADA en navegador (7/7)**: chitchat sin fuentes; ingesta `protocolo.md` indexado; CRAG con cita `[1]`; abstención SIN fuentes; "¿cuántos turnos esta semana?" → 20 turnos reales; listado de clientes multi-tenant; acción de escritura → stub "próximo slice".
 - **Bug menor hallado en el smoke y arreglado (commit `0821ed4`):** `render_rows_markdown` imprimía celdas NULL como el literal `"None"` (`str(None)`) → helper `_fmt` mapea `None`→vacío (y el camino escalar de `_deterministic`); y el seeder de clientes ahora carga `email`/`phone` (Faker) con backfill `ON CONFLICT (id) DO UPDATE` (ids determinísticos). Tests nuevos: render NULL→vacío (`test_sql_present`) + clientes con email (`test_seed_demo`, integración). Gate no-llm **106 passed**.
-- Servidores frenados al cierre. `main` local **55 commits adelante de `origin/main` (NO pusheado** — convención local-first; pedir OK explícito antes de pushear datos de un CRM de salud).
+- Servidores frenados al cierre. (Histórico: en ese momento `main` estaba 55 commits adelante de `origin/main`, sin pushear; YA PUSHEADO en el cierre del Slice 4.)
 
 ### Cierre sesión de limpieza pre-Fase 1 (2026-06-25)
 - **Limpieza backend + frontend saldada** (ver "Ítems de limpieza diferidos" más abajo). Commits: `b695414`, `b226fc2`, `7281a1a`, `28e2729`, `7b02f5d`, `6eae047`.
@@ -56,7 +65,7 @@ Hardening fichado (NO bloquea; traer cuando entre input no confiable o multi-ten
   3. `backend/tests/conftest.py` — `sse_starlette` mantiene un `should_exit_event` global ligado al loop del 1er test de streaming; se resetea por test para permitir varios tests SSE en una corrida.
 
 ### Fase 1 — alcance (CLAUDE.md §7 / Blueprint §6)
-Grafo LangGraph + router semántico · Agentic RAG correctivo (CRAG: reranker `bge-reranker-v2-m3` + jueces de relevancia/groundedness) · Data Agent NL2SQL + capa semántica (`semantic_layer/model.yaml`) · tools de escritura con human-in-the-loop (`interrupt`) · memoria de corto plazo (checkpointer Postgres) + memoria semántica básica · guardrails (Presidio PII español + inyección) · caching (semántico + embeddings) · eval mínima (golden set + juez `e4b`) + trazas Phoenix · frontend más rico (canvas: tablas, fichas, citas, vista de docs, tarjetas de confirmación).
+Grafo LangGraph + router semántico ✅ · Agentic RAG correctivo (CRAG) ✅ · Data Agent NL2SQL + capa semántica ✅ · tools de escritura con human-in-the-loop (`interrupt`) ✅ (`create_appointment`; falta `log_interaction`) · memoria de corto plazo (checkpointer Postgres) + memoria semántica básica · guardrails (Presidio PII español + inyección) · caching (semántico + embeddings) · eval mínima (golden set + juez `e4b`) + trazas Phoenix · frontend más rico (canvas: tablas, fichas, citas, vista de docs, tarjetas de confirmación).
 
 ### Ítems de limpieza diferidos (saldar ANTES de Fase 1)
 - **Backend — SALDADO (commits `b695414`, `b226fc2`, `7281a1a`):**
@@ -80,15 +89,16 @@ Grafo LangGraph + router semántico · Agentic RAG correctivo (CRAG: reranker `b
 docker compose up -d
 docker compose exec -T postgres psql -U praxia -d praxia < backend/app/schema.sql
 docker compose exec -T postgres psql -U praxia -d praxia < backend/app/seed.sql
+backend\.venv\Scripts\python backend\seed_demo.py    # datos demo (3 profesionales, 30 clientes, 80 turnos)
 # Backend (PowerShell: no usar 'cd x && y')
 backend\.venv\Scripts\python backend\dev.py        # runner con fix Windows (SelectorEventLoop)
-backend\.venv\Scripts\python -m pytest backend/tests -m "not llm" -q     # 19
-backend\.venv\Scripts\python -m pytest backend/tests -m llm -q           # 2 (requiere Ollama)
+backend\.venv\Scripts\python -m pytest backend/tests -m "not llm" -q     # 130 passed
+backend\.venv\Scripts\python -m pytest backend/tests -m llm -q           # e2e (requiere Ollama)
 # Frontend
 npm --prefix frontend run dev
 cd frontend; npx vitest run; npm run lint; npm run build
 # Ollama (ya instalado)
-ollama list      # debe figurar gemma4:12b
+ollama list      # debe figurar gemma4:12b y gemma4:e4b
 ```
 
 > Nota: para correr el smoke LLM real necesitás Ollama corriendo (servicio de Windows, arranca solo) + `docker compose up -d` + schema/seed aplicados. El test usa el app in-process (no hace falta uvicorn). El smoke manual del navegador está en `frontend/SMOKE.md`.
