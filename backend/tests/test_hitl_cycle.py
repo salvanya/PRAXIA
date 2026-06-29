@@ -24,6 +24,16 @@ CANCELLATION = {
     "summary": "Cancelar el turno de Ana López con Dra. Gómez el 01/07 10:00 (UTC)",
     "params": {"appointment_id": "a1"},
 }
+RESCHEDULE = {
+    "kind": "reschedule_appointment",
+    "summary": "Reprogramar el turno de Ana López con Dra. Gómez: 01/07 10:00 → 03/07 15:00 (UTC)",
+    "params": {"appointment_id": "a1"},
+}
+UPDATE_CLIENT = {
+    "kind": "update_client",
+    "summary": "Actualizar Ana López: teléfono 11-1111-1111 → 11-2233-4455",
+    "params": {"client_id": "c1"},
+}
 
 
 class _Spy:
@@ -77,6 +87,8 @@ def _install(monkeypatch, kind, action, write_spy):  # type: ignore[no-untyped-d
         ("create_appointment", APPOINTMENT),
         ("log_interaction", INTERACTION),
         ("cancel_appointment", CANCELLATION),
+        ("reschedule_appointment", RESCHEDULE),
+        ("update_client", UPDATE_CLIENT),
     ],
 )
 async def test_confirm_writes_exactly_once(monkeypatch, kind, action) -> None:
@@ -102,6 +114,8 @@ async def test_confirm_writes_exactly_once(monkeypatch, kind, action) -> None:
         ("create_appointment", APPOINTMENT),
         ("log_interaction", INTERACTION),
         ("cancel_appointment", CANCELLATION),
+        ("reschedule_appointment", RESCHEDULE),
+        ("update_client", UPDATE_CLIENT),
     ],
 )
 async def test_cancel_writes_nothing(monkeypatch, kind, action) -> None:

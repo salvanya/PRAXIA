@@ -114,8 +114,9 @@ async def propose_action_node(state: AgentState) -> dict:
         kind = "unsupported"
     if kind not in REGISTRY:
         msg = (
-            "Por ahora puedo agendar turnos, registrar interacciones o cancelar turnos. "
-            "¿Qué necesitás?"
+            "Por ahora puedo agendar turnos, reprogramar o cancelar turnos, "
+            "registrar interacciones o actualizar datos de clientes "
+            "(teléfono, email, estado). ¿Qué necesitás?"
         )
         write_token(msg)
         write_sources([])
