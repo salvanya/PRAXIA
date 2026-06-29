@@ -27,7 +27,7 @@ async def test_classify_returns_kind() -> None:
         == "create_appointment"
     )
     assert (
-        await classify_write_action("cancelá el turno", llm=FakeSeqLLM("unsupported"))
+        await classify_write_action("reprogramá el turno", llm=FakeSeqLLM("unsupported"))
         == "unsupported"
     )
 
@@ -46,8 +46,8 @@ async def test_classify_substring_retry_and_fallback() -> None:
     assert await classify_write_action("x", llm=FakeSeqLLM("???")) == "unsupported"
 
 
-def test_registry_has_both_tools() -> None:
-    assert set(REGISTRY) == {"create_appointment", "log_interaction"}
+def test_registry_has_all_tools() -> None:
+    assert set(REGISTRY) == {"create_appointment", "log_interaction", "cancel_appointment"}
     for kind, tool in REGISTRY.items():
         assert tool.kind == kind
         assert tool.cancel_message
@@ -127,3 +127,40 @@ async def test_write_appointment_adapter_drops_display_keys(monkeypatch) -> None
     assert captured["start_at"] == datetime(2026, 6, 30, 10, 0, tzinfo=UTC)  # ISO→datetime
     assert "client_name" not in captured and "practitioner_name" not in captured
     assert row["id"] == "a1"
+
+
+async def test_classify_routes_cancel() -> None:
+    assert (
+        await classify_write_action("cancelá el turno de Ana", llm=FakeSeqLLM("cancel_appointment"))
+        == "cancel_appointment"
+    )
+
+
+async def test_write_cancel_adapter_wraps_row(monkeypatch) -> None:
+    async def _fake_cancel(practice_id, appointment_id):  # type: ignore[no-untyped-def]
+        return {"id": appointment_id, "status": "cancelado", "start_at": None}
+
+    monkeypatch.setattr(write_tools.db, "cancel_appointment", _fake_cancel)
+    row = await write_tools._write_cancel("pid", {"appointment_id": "a1", "client_name": "Ana"})
+    assert row["cancelled"] is True and row["status"] == "cancelado"
+
+
+async def test_write_cancel_adapter_handles_none(monkeypatch) -> None:
+    async def _fake_cancel(practice_id, appointment_id):  # type: ignore[no-untyped-def]
+        return None
+
+    monkeypatch.setattr(write_tools.db, "cancel_appointment", _fake_cancel)
+    row = await write_tools._write_cancel("pid", {"appointment_id": "a1"})
+    assert row == {"cancelled": False}
+
+
+def test_cancel_receipt_ok_and_not_ok() -> None:
+    params = {
+        "client_name": "Ana López",
+        "practitioner_name": "Dra. Gómez",
+        "start_at": "2026-07-01T10:00:00+00:00",
+    }
+    ok = write_tools.format_cancel_receipt(params, {"cancelled": True})
+    assert "✅" in ok and "Ana López" in ok and "Dra. Gómez" in ok
+    bad = write_tools.format_cancel_receipt(params, {"cancelled": False})
+    assert "⚠️" in bad
