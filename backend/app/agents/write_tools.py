@@ -1,12 +1,14 @@
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any
 
 from app import db
 from app.agents.action_agent import ProposalResult, propose_appointment
 from app.agents.cancel_agent import propose_cancellation
 from app.agents.interaction_agent import propose_interaction
+from app.agents.reschedule_agent import propose_reschedule
+from app.agents.update_client_agent import propose_update_client
 from app.llm import make_llm
 
 
@@ -81,6 +83,63 @@ def format_cancel_receipt(params: dict[str, Any], row: dict[str, Any]) -> str:
     )
 
 
+# ---- reschedule_appointment ----
+async def _write_reschedule(practice_id: str, params: dict[str, Any]) -> dict[str, Any]:
+    row = await db.reschedule_appointment(
+        practice_id,
+        params["appointment_id"],
+        datetime.fromisoformat(params["new_start_at"]),
+        datetime.fromisoformat(params["new_end_at"]),
+    )
+    return {"rescheduled": True, **row} if row is not None else {"rescheduled": False}
+
+
+def format_reschedule_receipt(params: dict[str, Any], row: dict[str, Any]) -> str:
+    if not row.get("rescheduled"):
+        return (
+            "⚠️ No pude reprogramar el turno: ya no estaba disponible "
+            "(puede haberse cancelado o atendido)."
+        )
+    start = datetime.fromisoformat(params["new_start_at"])
+    return (
+        f"✅ Turno reprogramado: {params['client_name']} con {params['practitioner_name']} "
+        f"→ {start.strftime('%d/%m %H:%M')} (UTC)."
+    )
+
+
+# ---- update_client ----
+_CLIENT_FIELD_LABELS = {
+    "phone": "teléfono",
+    "email": "email",
+    "status": "estado",
+    "dob": "fecha de nacimiento",
+}
+
+
+async def _write_update_client(practice_id: str, params: dict[str, Any]) -> dict[str, Any]:
+    dob = params.get("dob")
+    row = await db.update_client(
+        practice_id,
+        params["client_id"],
+        phone=params.get("phone"),
+        email=params.get("email"),
+        status=params.get("status"),
+        dob=date.fromisoformat(dob) if dob else None,
+    )
+    return {"updated": True, **row} if row is not None else {"updated": False}
+
+
+def format_update_client_receipt(params: dict[str, Any], row: dict[str, Any]) -> str:
+    if not row.get("updated"):
+        return "⚠️ No pude actualizar al cliente: no lo encontré."
+    campos = [
+        f"{_CLIENT_FIELD_LABELS[f]} → {params[f]}"
+        for f in ("phone", "email", "status", "dob")
+        if params.get(f)
+    ]
+    return f"✅ Datos actualizados de {row['full_name']}: " + "; ".join(campos) + "."
+
+
 REGISTRY: dict[str, WriteTool] = {
     "create_appointment": WriteTool(
         kind="create_appointment",
@@ -103,6 +162,20 @@ REGISTRY: dict[str, WriteTool] = {
         format_receipt=format_cancel_receipt,
         cancel_message="Listo, dejé el turno como estaba.",
     ),
+    "reschedule_appointment": WriteTool(
+        kind="reschedule_appointment",
+        propose=propose_reschedule,
+        write=_write_reschedule,
+        format_receipt=format_reschedule_receipt,
+        cancel_message="Listo, dejé el turno como estaba.",
+    ),
+    "update_client": WriteTool(
+        kind="update_client",
+        propose=propose_update_client,
+        write=_write_update_client,
+        format_receipt=format_update_client_receipt,
+        cancel_message="Listo, no cambié los datos del cliente.",
+    ),
 }
 
 
@@ -110,6 +183,8 @@ WRITE_KINDS: tuple[str, ...] = (
     "create_appointment",
     "log_interaction",
     "cancel_appointment",
+    "reschedule_appointment",
+    "update_client",
     "unsupported",
 )
 
@@ -117,17 +192,22 @@ CLASSIFY_PROMPT = (
     "Sos el despachador de acciones de escritura de un CRM de prácticas profesionales. "
     "El usuario pidió ejecutar UNA acción que modifica datos. Clasificá QUÉ acción es:\n"
     "- create_appointment: agendar/crear un turno NUEVO. "
-    'Ej: "agendá un turno para Ana mañana 10", "dale una cita a Juan el martes", '
-    '"reservá un turno con la Dra. Gómez".\n'
+    'Ej: "agendá un turno para Ana mañana 10".\n'
     "- log_interaction: registrar/anotar una interacción YA OCURRIDA con un cliente "
     "(sesión, llamada, email, nota, mensaje). "
-    'Ej: "registrá que llamé a Ana", "anotá una nota sobre Juan".\n'
-    "- cancel_appointment: cancelar/anular un turno YA EXISTENTE. "
-    'Ej: "cancelá el turno de Juan", "anulá la cita de Ana del martes", '
-    '"cancelá el turno de las 10 de Pedro".\n'
-    "- unsupported: cualquier OTRA acción de escritura que NO sea esas tres "
-    "(REPROGRAMAR/EDITAR un turno, dar de baja un cliente, facturar). "
-    'Ej: "reprogramá el turno de Juan", "cambiá la hora de la cita".\n'
+    'Ej: "registrá que llamé a Ana".\n'
+    "- cancel_appointment: cancelar/anular un turno EXISTENTE. "
+    'Ej: "cancelá el turno de Juan".\n'
+    "- reschedule_appointment: REPROGRAMAR/MOVER/cambiar la fecha u hora de un turno EXISTENTE "
+    "(el turno sigue existiendo, cambia CUÁNDO). "
+    'Ej: "reprogramá el turno de Juan para el jueves", "movés la cita de Ana a las 15", '
+    '"cambiá el turno de Pedro al lunes 11".\n'
+    "- update_client: editar DATOS del CLIENTE (teléfono, email, estado activo/inactivo/baja, "
+    "fecha de nacimiento). "
+    'Ej: "cambiá el teléfono de Ana", "actualizá el email de Juan", "dá de baja a Pedro".\n'
+    "- unsupported: cualquier OTRA acción de escritura (facturar; agregar/editar una NOTA o texto "
+    "libre de un cliente; borrar registros). "
+    'Ej: "agregá una nota sobre Juan", "facturá la sesión de Ana".\n'
     "Respondé solo con la opción."
 )
 
