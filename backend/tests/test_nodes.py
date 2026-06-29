@@ -80,6 +80,7 @@ async def test_propose_action_unsupported_emits_capabilities(monkeypatch):
     tokens, sources = await _run(nodes.propose_action_node, new_state("cancelá el turno", "p", "t"))
     assert "agendar turnos" in tokens and "registrar interacciones" in tokens
     assert "cancelar turnos" in tokens
+    assert "reprogramar" in tokens and "actualizar datos de clientes" in tokens
     assert sources == []
 
 

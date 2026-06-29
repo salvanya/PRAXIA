@@ -27,7 +27,7 @@ async def test_classify_returns_kind() -> None:
         == "create_appointment"
     )
     assert (
-        await classify_write_action("reprogramá el turno", llm=FakeSeqLLM("unsupported"))
+        await classify_write_action("facturá la sesión", llm=FakeSeqLLM("unsupported"))
         == "unsupported"
     )
 
@@ -47,7 +47,13 @@ async def test_classify_substring_retry_and_fallback() -> None:
 
 
 def test_registry_has_all_tools() -> None:
-    assert set(REGISTRY) == {"create_appointment", "log_interaction", "cancel_appointment"}
+    assert set(REGISTRY) == {
+        "create_appointment",
+        "log_interaction",
+        "cancel_appointment",
+        "reschedule_appointment",
+        "update_client",
+    }
     for kind, tool in REGISTRY.items():
         assert tool.kind == kind
         assert tool.cancel_message
@@ -163,4 +169,98 @@ def test_cancel_receipt_ok_and_not_ok() -> None:
     ok = write_tools.format_cancel_receipt(params, {"cancelled": True})
     assert "✅" in ok and "Ana López" in ok and "Dra. Gómez" in ok
     bad = write_tools.format_cancel_receipt(params, {"cancelled": False})
+    assert "⚠️" in bad
+
+
+async def test_classify_routes_reschedule_and_update_client() -> None:
+    assert (
+        await classify_write_action(
+            "reprogramá el turno de Ana", llm=FakeSeqLLM("reschedule_appointment")
+        )
+        == "reschedule_appointment"
+    )
+    assert (
+        await classify_write_action(
+            "cambiá el teléfono de Ana", llm=FakeSeqLLM("update_client")
+        )
+        == "update_client"
+    )
+
+
+async def test_write_reschedule_adapter(monkeypatch) -> None:
+    captured: dict = {}
+
+    async def _fake(practice_id, appointment_id, new_start_at, new_end_at):  # type: ignore[no-untyped-def]
+        captured.update(appointment_id=appointment_id, new_start_at=new_start_at, new_end_at=new_end_at)
+        return {"id": appointment_id, "status": "programado", "start_at": new_start_at, "end_at": new_end_at}
+
+    monkeypatch.setattr(write_tools.db, "reschedule_appointment", _fake)
+    params = {
+        "appointment_id": "a1",
+        "new_start_at": "2026-07-03T15:00:00+00:00",
+        "new_end_at": "2026-07-03T15:30:00+00:00",
+        "client_name": "Ana López",
+    }
+    row = await write_tools._write_reschedule("pid", params)
+    assert row["rescheduled"] is True
+    assert captured["new_start_at"] == datetime(2026, 7, 3, 15, 0, tzinfo=UTC)  # ISO→datetime
+    assert "client_name" not in captured
+
+
+async def test_write_reschedule_adapter_handles_none(monkeypatch) -> None:
+    async def _fake(practice_id, appointment_id, new_start_at, new_end_at):  # type: ignore[no-untyped-def]
+        return None
+
+    monkeypatch.setattr(write_tools.db, "reschedule_appointment", _fake)
+    row = await write_tools._write_reschedule(
+        "pid",
+        {"appointment_id": "a1", "new_start_at": "2026-07-03T15:00:00+00:00", "new_end_at": "2026-07-03T15:30:00+00:00"},
+    )
+    assert row == {"rescheduled": False}
+
+
+def test_reschedule_receipt_ok_and_not_ok() -> None:
+    params = {
+        "client_name": "Ana López",
+        "practitioner_name": "Dra. Gómez",
+        "new_start_at": "2026-07-03T15:00:00+00:00",
+    }
+    ok = write_tools.format_reschedule_receipt(params, {"rescheduled": True})
+    assert "✅" in ok and "Ana López" in ok and "Dra. Gómez" in ok
+    bad = write_tools.format_reschedule_receipt(params, {"rescheduled": False})
+    assert "⚠️" in bad
+
+
+async def test_write_update_client_adapter(monkeypatch) -> None:
+    captured: dict = {}
+
+    async def _fake(practice_id, client_id, *, phone, email, status, dob):  # type: ignore[no-untyped-def]
+        captured.update(client_id=client_id, phone=phone, email=email, status=status, dob=dob)
+        return {"id": client_id, "full_name": "Ana López", "phone": phone, "email": email, "status": status, "dob": None}
+
+    monkeypatch.setattr(write_tools.db, "update_client", _fake)
+    params = {"client_id": "c1", "client_name": "Ana López", "phone": "11-2233-4455", "status": "baja"}
+    row = await write_tools._write_update_client("pid", params)
+    assert row["updated"] is True
+    assert captured["phone"] == "11-2233-4455" and captured["status"] == "baja"
+    assert captured["email"] is None and captured["dob"] is None  # no provistos → None
+    assert "client_name" not in captured
+
+
+async def test_write_update_client_adapter_handles_none(monkeypatch) -> None:
+    async def _fake(practice_id, client_id, *, phone, email, status, dob):  # type: ignore[no-untyped-def]
+        return None
+
+    monkeypatch.setattr(write_tools.db, "update_client", _fake)
+    row = await write_tools._write_update_client("pid", {"client_id": "c1", "phone": "9"})
+    assert row == {"updated": False}
+
+
+def test_update_client_receipt_lists_changed_fields() -> None:
+    params = {"client_id": "c1", "phone": "11-2233-4455", "status": "baja"}
+    ok = write_tools.format_update_client_receipt(params, {"updated": True, "full_name": "Ana López"})
+    assert "✅" in ok and "Ana López" in ok
+    assert "teléfono" in ok and "11-2233-4455" in ok and "estado" in ok
+    assert "email" not in ok  # no cambió → no se lista
+    bad = write_tools.format_update_client_receipt(params, {"updated": False})
     assert "⚠️" in bad
