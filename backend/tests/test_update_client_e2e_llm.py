@@ -69,6 +69,7 @@ async def test_update_client_decline_leaves_it() -> None:
             ),
             config,
         )
+        assert (await graph.aget_state(config)).next == ("confirm_action",)
         await graph.ainvoke(Command(resume="cancel"), config)
         assert (await db.get_client(pid, cid))["phone"] == "11-0000-0000"  # intacto
     finally:

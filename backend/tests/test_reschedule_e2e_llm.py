@@ -79,6 +79,7 @@ async def test_reschedule_decline_leaves_it() -> None:
             ),
             config,
         )
+        assert (await graph.aget_state(config)).next == ("confirm_action",)
         await graph.ainvoke(Command(resume="cancel"), config)
         new_start, status = await _row(aid)
         assert new_start == original_start and status == "programado"
