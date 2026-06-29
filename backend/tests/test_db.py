@@ -1,6 +1,6 @@
 import os
 import uuid
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from uuid import uuid4
 
 import pytest
@@ -130,7 +130,9 @@ async def test_reschedule_moves_times_and_guards() -> None:
     now = datetime.now(UTC)
     try:
         start = now + timedelta(days=1)
-        appt = await db.create_appointment(pid, cid, prac["id"], start, start + timedelta(minutes=30))
+        appt = await db.create_appointment(
+            pid, cid, prac["id"], start, start + timedelta(minutes=30)
+        )
         new_start = now + timedelta(days=2)
         new_end = new_start + timedelta(minutes=30)
 
@@ -144,6 +146,51 @@ async def test_reschedule_moves_times_and_guards() -> None:
         # guard de estado: un turno cancelado no es reprogramable
         await db.cancel_appointment(pid, appt["id"])
         assert await db.reschedule_appointment(pid, appt["id"], new_start, new_end) is None
+    finally:
+        pool = await db.get_pool()
+        await pool.execute("DELETE FROM clients WHERE id = $1", cid)
+
+
+@pytest.mark.integration
+async def test_get_client_is_tenant_scoped() -> None:
+    from seed_demo import seed_demo
+
+    await seed_demo()
+    pid = get_settings().practice_id
+    cid = await _new_client(pid, "Get Client " + uuid4().hex[:6])
+    try:
+        row = await db.get_client(pid, cid)
+        assert row is not None and row["id"] == cid and row["status"] == "activo"
+        assert await db.get_client(str(uuid4()), cid) is None  # otra práctica → None
+    finally:
+        pool = await db.get_pool()
+        await pool.execute("DELETE FROM clients WHERE id = $1", cid)
+
+
+@pytest.mark.integration
+async def test_update_client_partial_coalesce_and_guards() -> None:
+    from seed_demo import seed_demo
+
+    await seed_demo()
+    pid = get_settings().practice_id
+    cid = await _new_client(pid, "Update Client " + uuid4().hex[:6])
+    try:
+        # solo phone: email/status/dob intactos (COALESCE)
+        row = await db.update_client(pid, cid, phone="11-2233-4455")
+        assert row is not None and row["phone"] == "11-2233-4455"
+        assert row["email"] is None and row["status"] == "activo"
+
+        # varios campos a la vez, incluyendo dob (date) y status enum
+        row = await db.update_client(
+            pid, cid, email="ana@x.com", status="baja", dob=date(1990, 5, 4)
+        )
+        assert row is not None
+        assert row["email"] == "ana@x.com" and row["status"] == "baja"
+        assert row["dob"] == "1990-05-04" and row["phone"] == "11-2233-4455"  # phone se mantuvo
+
+        # guard de tenant: otra práctica → None y sin efecto
+        assert await db.update_client(str(uuid4()), cid, phone="99") is None
+        assert (await db.get_client(pid, cid))["phone"] == "11-2233-4455"
     finally:
         pool = await db.get_pool()
         await pool.execute("DELETE FROM clients WHERE id = $1", cid)

@@ -1,5 +1,5 @@
 import asyncio
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any
 
 import asyncpg
@@ -298,3 +298,51 @@ async def log_interaction(
     if row is None:
         raise RuntimeError("log_interaction: cliente fuera de la práctica o inexistente")
     return dict(row)
+
+
+async def get_client(practice_id: str, client_id: str) -> dict[str, Any] | None:
+    """Lee un cliente scopeado por práctica (para el antes→después de update_client)."""
+    pool = await get_pool()
+    row = await pool.fetchrow(
+        """
+        SELECT id::text, full_name, phone, email, status, dob::text
+        FROM clients WHERE id = $1 AND practice_id = $2
+        """,
+        client_id,
+        practice_id,
+    )
+    return dict(row) if row is not None else None
+
+
+async def update_client(
+    practice_id: str,
+    client_id: str,
+    *,
+    phone: str | None = None,
+    email: str | None = None,
+    status: str | None = None,
+    dob: date | None = None,
+) -> dict[str, Any] | None:
+    """Tool de escritura parametrizada: actualiza campos ESTRUCTURADOS del cliente. COALESCE
+    setea solo lo provisto (un None mantiene el valor actual, no borra). Guard de tenant
+    (practice_id). El CHECK del schema valida el enum de status. Devuelve la fila actualizada,
+    o None si el cliente es de otra práctica / inexistente. NO toca `notes` (texto libre)."""
+    pool = await get_pool()
+    row = await pool.fetchrow(
+        """
+        UPDATE clients SET
+            phone = COALESCE($3, phone),
+            email = COALESCE($4, email),
+            status = COALESCE($5, status),
+            dob = COALESCE($6, dob)
+        WHERE id = $1 AND practice_id = $2
+        RETURNING id::text, full_name, phone, email, status, dob::text
+        """,
+        client_id,
+        practice_id,
+        phone,
+        email,
+        status,
+        dob,
+    )
+    return dict(row) if row is not None else None
