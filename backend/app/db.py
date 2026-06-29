@@ -200,6 +200,50 @@ async def create_appointment(
     return dict(row)
 
 
+async def find_cancellable_appointments(
+    practice_id: str, client_id: str, *, now: datetime, limit: int
+) -> list[dict[str, Any]]:
+    """Turnos del cliente que son cancelables: futuros (start_at >= now) y en estado
+    'programado'/'confirmado'. Scoped por practice_id. Incluye el nombre del profesional
+    para la tarjeta y los mensajes de desambiguación."""
+    pool = await get_pool()
+    rows = await pool.fetch(
+        """
+        SELECT a.id::text, a.start_at, a.end_at, a.status,
+               a.practitioner_id::text, p.full_name AS practitioner_full_name
+        FROM appointments a
+        JOIN practitioners p ON a.practitioner_id = p.id
+        WHERE a.practice_id = $1 AND a.client_id = $2
+          AND a.start_at >= $3 AND a.status IN ('programado', 'confirmado')
+        ORDER BY a.start_at
+        LIMIT $4
+        """,
+        practice_id,
+        client_id,
+        now,
+        limit,
+    )
+    return [dict(r) for r in rows]
+
+
+async def cancel_appointment(practice_id: str, appointment_id: str) -> dict[str, Any] | None:
+    """Tool de escritura parametrizada: pasa un turno a 'cancelado'. Guard de tenant
+    (practice_id) + de estado (solo programado/confirmado → idempotencia y TOCTOU).
+    Devuelve la fila actualizada, o None si no matcheó (otra práctica, inexistente, o ya
+    no cancelable)."""
+    pool = await get_pool()
+    row = await pool.fetchrow(
+        """
+        UPDATE appointments SET status = 'cancelado'
+        WHERE id = $1 AND practice_id = $2 AND status IN ('programado', 'confirmado')
+        RETURNING id::text, status, start_at
+        """,
+        appointment_id,
+        practice_id,
+    )
+    return dict(row) if row is not None else None
+
+
 async def log_interaction(
     practice_id: str,
     client_id: str,
