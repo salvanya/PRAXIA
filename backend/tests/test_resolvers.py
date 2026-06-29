@@ -1,3 +1,5 @@
+from datetime import UTC, datetime
+
 from app import db
 from app.agents import resolvers
 
@@ -33,8 +35,6 @@ async def test_ambiguous(monkeypatch) -> None:
     r = await resolvers.resolve_single_client("pid", "Ana", limit=5)
     assert r.client is None and r.abstain_reason == "client_ambiguous"
 
-
-from datetime import UTC, datetime
 
 NOW = datetime(2026, 6, 29, 9, 0, tzinfo=UTC)
 CLIENT = {"id": "c1", "full_name": "Ana López"}
@@ -116,3 +116,30 @@ async def test_appt_hint_time_disambiguates_same_day(monkeypatch) -> None:
     when = datetime(2026, 7, 1, 15, 0, tzinfo=UTC)
     r = await resolvers.resolve_single_appointment("pid", CLIENT, when, now=NOW, limit=5)
     assert r.appointment is not None and r.appointment["id"] == "a2"
+
+
+async def test_appt_day_only_hint_two_same_day_ambiguous(monkeypatch) -> None:
+    _patch_appts(
+        monkeypatch,
+        [
+            _appt("a1", datetime(2026, 7, 1, 10, 0, tzinfo=UTC)),
+            _appt("a2", datetime(2026, 7, 1, 15, 0, tzinfo=UTC)),
+        ],
+    )
+    when = datetime(2026, 7, 1, 0, 0, tzinfo=UTC)  # solo el día: dos turnos ese día, sin hora
+    r = await resolvers.resolve_single_appointment("pid", CLIENT, when, now=NOW, limit=5)
+    assert r.appointment is None and r.abstain_reason == "appointment_ambiguous"
+
+
+async def test_appt_time_matches_none_falls_back_to_day_ambiguous(monkeypatch) -> None:
+    _patch_appts(
+        monkeypatch,
+        [
+            _appt("a1", datetime(2026, 7, 1, 10, 0, tzinfo=UTC)),
+            _appt("a2", datetime(2026, 7, 1, 15, 0, tzinfo=UTC)),
+        ],
+    )
+    when = datetime(2026, 7, 1, 18, 0, tzinfo=UTC)  # hora explícita que no matchea ninguno
+    r = await resolvers.resolve_single_appointment("pid", CLIENT, when, now=NOW, limit=5)
+    assert r.appointment is None and r.abstain_reason == "appointment_ambiguous"
+    assert "01/07 10:00" in r.abstain_message and "01/07 15:00" in r.abstain_message
