@@ -28,6 +28,7 @@ export default function Home() {
           </div>
           {pending && (
             <ConfirmCard
+              key={pending.threadId}
               threadId={pending.threadId}
               action={pending.action}
               onClose={() => setPending(null)}

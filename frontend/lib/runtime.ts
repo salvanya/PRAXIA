@@ -52,7 +52,7 @@ export function useChatRuntime(onConfirm?: (p: PendingAction) => void) {
             } else if (ev.type === "confirm") {
               onConfirm?.({ threadId: ev.threadId, action: ev.action });
               yield {
-                content: [{ type: "text", text: "📝 Propuse un turno — revisá la tarjeta de confirmación." }],
+                content: [{ type: "text", text: "📝 Propuse una acción — revisá la tarjeta de confirmación." }],
               };
               return;
             }
