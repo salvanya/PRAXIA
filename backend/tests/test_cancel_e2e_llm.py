@@ -25,10 +25,14 @@ async def _seed_unique_client_with_appt(pid: str) -> tuple[str, str, str]:
         pid,
         full_name,
     )
-    start = datetime.now(UTC) + timedelta(days=3)
-    appt = await db.create_appointment(
-        pid, client_id, prac["id"], start, start + timedelta(minutes=30)
-    )
+    try:
+        start = datetime.now(UTC) + timedelta(days=3)
+        appt = await db.create_appointment(
+            pid, client_id, prac["id"], start, start + timedelta(minutes=30)
+        )
+    except Exception:
+        await pool.execute("DELETE FROM clients WHERE id = $1", client_id)
+        raise
     return full_name, client_id, appt["id"]
 
 
