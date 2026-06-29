@@ -5,6 +5,7 @@ from typing import Any
 
 from app import db
 from app.agents.action_agent import ProposalResult, propose_appointment
+from app.agents.cancel_agent import propose_cancellation
 from app.agents.interaction_agent import propose_interaction
 from app.llm import make_llm
 
@@ -61,6 +62,25 @@ def format_interaction_receipt(params: dict[str, Any], row: dict[str, Any]) -> s
     )
 
 
+# ---- cancel_appointment ----
+async def _write_cancel(practice_id: str, params: dict[str, Any]) -> dict[str, Any]:
+    row = await db.cancel_appointment(practice_id, params["appointment_id"])
+    return {"cancelled": True, **row} if row is not None else {"cancelled": False}
+
+
+def format_cancel_receipt(params: dict[str, Any], row: dict[str, Any]) -> str:
+    if not row.get("cancelled"):
+        return (
+            "⚠️ No pude cancelar el turno: ya no estaba disponible "
+            "(puede haberse cancelado o atendido)."
+        )
+    start = datetime.fromisoformat(params["start_at"])
+    return (
+        f"✅ Turno cancelado: {params['client_name']} con {params['practitioner_name']} "
+        f"el {start.strftime('%d/%m %H:%M')} (UTC)."
+    )
+
+
 REGISTRY: dict[str, WriteTool] = {
     "create_appointment": WriteTool(
         kind="create_appointment",
@@ -76,22 +96,38 @@ REGISTRY: dict[str, WriteTool] = {
         format_receipt=format_interaction_receipt,
         cancel_message="Cancelado, no registré la interacción.",
     ),
+    "cancel_appointment": WriteTool(
+        kind="cancel_appointment",
+        propose=propose_cancellation,
+        write=_write_cancel,
+        format_receipt=format_cancel_receipt,
+        cancel_message="Listo, dejé el turno como estaba.",
+    ),
 }
 
 
-WRITE_KINDS: tuple[str, ...] = ("create_appointment", "log_interaction", "unsupported")
+WRITE_KINDS: tuple[str, ...] = (
+    "create_appointment",
+    "log_interaction",
+    "cancel_appointment",
+    "unsupported",
+)
 
 CLASSIFY_PROMPT = (
     "Sos el despachador de acciones de escritura de un CRM de prácticas profesionales. "
     "El usuario pidió ejecutar UNA acción que modifica datos. Clasificá QUÉ acción es:\n"
-    "- create_appointment: agendar/crear un turno o cita. "
-    'Ej: "agendá un turno para Ana mañana 10", "dale una cita a Juan el martes".\n'
-    "- log_interaction: registrar/anotar una interacción ya ocurrida con un cliente "
+    "- create_appointment: agendar/crear un turno NUEVO. "
+    'Ej: "agendá un turno para Ana mañana 10", "dale una cita a Juan el martes", '
+    '"reservá un turno con la Dra. Gómez".\n'
+    "- log_interaction: registrar/anotar una interacción YA OCURRIDA con un cliente "
     "(sesión, llamada, email, nota, mensaje). "
-    'Ej: "registrá que llamé a Ana", "anotá una nota sobre Juan", "guardá que le mandé un email".\n'
-    "- unsupported: cualquier otra acción de escritura que NO sea esas dos (cancelar/editar/"
-    "reprogramar un turno, dar de baja un cliente, facturar). "
-    'Ej: "cancelá el turno de Juan", "editá la cita".\n'
+    'Ej: "registrá que llamé a Ana", "anotá una nota sobre Juan".\n'
+    "- cancel_appointment: cancelar/anular un turno YA EXISTENTE. "
+    'Ej: "cancelá el turno de Juan", "anulá la cita de Ana del martes", '
+    '"cancelá el turno de las 10 de Pedro".\n'
+    "- unsupported: cualquier OTRA acción de escritura que NO sea esas tres "
+    "(REPROGRAMAR/EDITAR un turno, dar de baja un cliente, facturar). "
+    'Ej: "reprogramá el turno de Juan", "cambiá la hora de la cita".\n'
     "Respondé solo con la opción."
 )
 

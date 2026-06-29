@@ -19,6 +19,11 @@ INTERACTION = {
     "summary": "Registrar llamada de Ana López — «confirmó el turno»",
     "params": {"client_id": "c1"},
 }
+CANCELLATION = {
+    "kind": "cancel_appointment",
+    "summary": "Cancelar el turno de Ana López con Dra. Gómez el 01/07 10:00 (UTC)",
+    "params": {"appointment_id": "a1"},
+}
 
 
 class _Spy:
@@ -68,7 +73,11 @@ def _install(monkeypatch, kind, action, write_spy):  # type: ignore[no-untyped-d
 
 @pytest.mark.parametrize(
     "kind,action",
-    [("create_appointment", APPOINTMENT), ("log_interaction", INTERACTION)],
+    [
+        ("create_appointment", APPOINTMENT),
+        ("log_interaction", INTERACTION),
+        ("cancel_appointment", CANCELLATION),
+    ],
 )
 async def test_confirm_writes_exactly_once(monkeypatch, kind, action) -> None:
     spy = _Spy({"id": "row-1", "status": "programado", "occurred_at": None, "type": "llamada"})
@@ -89,7 +98,11 @@ async def test_confirm_writes_exactly_once(monkeypatch, kind, action) -> None:
 
 @pytest.mark.parametrize(
     "kind,action",
-    [("create_appointment", APPOINTMENT), ("log_interaction", INTERACTION)],
+    [
+        ("create_appointment", APPOINTMENT),
+        ("log_interaction", INTERACTION),
+        ("cancel_appointment", CANCELLATION),
+    ],
 )
 async def test_cancel_writes_nothing(monkeypatch, kind, action) -> None:
     spy = _Spy({"id": "row-1"})
