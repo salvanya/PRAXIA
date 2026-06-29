@@ -114,8 +114,8 @@ async def propose_action_node(state: AgentState) -> dict:
         kind = "unsupported"
     if kind not in REGISTRY:
         msg = (
-            "Por ahora puedo agendar turnos o registrar interacciones. "
-            "¿Cuál de las dos necesitás?"
+            "Por ahora puedo agendar turnos, registrar interacciones o cancelar turnos. "
+            "¿Qué necesitás?"
         )
         write_token(msg)
         write_sources([])
@@ -133,7 +133,8 @@ async def propose_action_node(state: AgentState) -> dict:
 
 
 async def confirm_action_node(state: AgentState) -> dict:
-    action = state["proposed_action"] or {}
+    action = state["proposed_action"]
+    assert action is not None  # route_after_propose garantiza no-None acá
     tool = REGISTRY[action["kind"]]
     decision = interrupt(action)
     if decision == "confirm":
