@@ -117,3 +117,33 @@ async def test_cancel_appointment_sets_cancelado_and_guards() -> None:
     finally:
         pool = await db.get_pool()
         await pool.execute("DELETE FROM clients WHERE id = $1", cid)
+
+
+@pytest.mark.integration
+async def test_reschedule_moves_times_and_guards() -> None:
+    from seed_demo import seed_demo
+
+    await seed_demo()
+    pid = get_settings().practice_id
+    prac = (await db.list_active_practitioners(pid))[0]
+    cid = await _new_client(pid, "Reschedule Writer " + uuid4().hex[:6])
+    now = datetime.now(UTC)
+    try:
+        start = now + timedelta(days=1)
+        appt = await db.create_appointment(pid, cid, prac["id"], start, start + timedelta(minutes=30))
+        new_start = now + timedelta(days=2)
+        new_end = new_start + timedelta(minutes=30)
+
+        row = await db.reschedule_appointment(pid, appt["id"], new_start, new_end)
+        assert row is not None and row["status"] == "programado"
+        assert row["start_at"] == new_start and row["end_at"] == new_end
+
+        # guard de tenant: otra práctica no puede reprogramar
+        assert await db.reschedule_appointment(str(uuid4()), appt["id"], new_start, new_end) is None
+
+        # guard de estado: un turno cancelado no es reprogramable
+        await db.cancel_appointment(pid, appt["id"])
+        assert await db.reschedule_appointment(pid, appt["id"], new_start, new_end) is None
+    finally:
+        pool = await db.get_pool()
+        await pool.execute("DELETE FROM clients WHERE id = $1", cid)
