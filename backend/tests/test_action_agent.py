@@ -2,7 +2,13 @@ from datetime import UTC, datetime
 
 from app import db
 from app.agents import action_agent
-from app.agents.action_agent import ProposalResult, ProposedAppointment
+from app.agents.action_agent import (
+    ProposalResult,
+    ProposedAppointment,
+    clarify_or_abstain_appointment,
+    clarify_or_abstain_client,
+)
+from app.agents.resolvers import AppointmentResolution, ClientResolution
 
 NOW = datetime(2026, 6, 29, 12, 0, tzinfo=UTC)
 
@@ -210,3 +216,26 @@ async def test_abstains_when_client_name_empty(monkeypatch) -> None:
     result = await action_agent.propose_appointment("agendá el turno", "pid", now=NOW, gen_llm=llm)
     assert result.abstained
     assert result.reason == "client_missing"
+
+
+def test_clarify_or_abstain_client_ambiguous_sets_clarification() -> None:
+    res = ClientResolution(
+        None, "Hay varios", "client_ambiguous", candidates=[{"id": "1"}, {"id": "2"}]
+    )
+    pr = clarify_or_abstain_client(res)
+    assert pr.abstained and pr.clarification is not None
+    assert pr.clarification.stage == "client" and len(pr.clarification.candidates) == 2
+
+
+def test_clarify_or_abstain_client_not_found_has_no_clarification() -> None:
+    res = ClientResolution(None, "No encontré", "client_not_found")
+    pr = clarify_or_abstain_client(res)
+    assert pr.abstained and pr.clarification is None
+
+
+def test_clarify_or_abstain_appointment_ambiguous_sets_stage() -> None:
+    res = AppointmentResolution(
+        None, "Varios turnos", "appointment_ambiguous", candidates=[{"id": "a1"}]
+    )
+    pr = clarify_or_abstain_appointment(res)
+    assert pr.clarification is not None and pr.clarification.stage == "appointment"

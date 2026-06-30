@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, time
 from typing import Any
 
@@ -10,6 +10,7 @@ class ClientResolution:
     client: dict[str, Any] | None
     abstain_message: str
     abstain_reason: str
+    candidates: list[dict[str, Any]] = field(default_factory=list)
 
 
 async def resolve_single_client(practice_id: str, name: str, *, limit: int) -> ClientResolution:
@@ -30,6 +31,7 @@ async def resolve_single_client(practice_id: str, name: str, *, limit: int) -> C
             None,
             f"Hay varios clientes que coinciden con «{name}»: {names}. ¿Cuál es?",
             "client_ambiguous",
+            candidates=clients,
         )
     return ClientResolution(clients[0], "", "ok")
 
@@ -39,6 +41,7 @@ class AppointmentResolution:
     appointment: dict[str, Any] | None
     abstain_message: str
     abstain_reason: str
+    candidates: list[dict[str, Any]] = field(default_factory=list)
 
 
 _WEEKDAYS_ES = ["lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo"]
@@ -96,5 +99,6 @@ async def resolve_single_appointment(
             f"{name} tiene varios turnos próximos: {_format_list(matches)}. "
             "¿Cuál? Decime la fecha y la hora.",
             "appointment_ambiguous",
+            candidates=matches,
         )
     return AppointmentResolution(matches[0], "", "ok")

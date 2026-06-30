@@ -5,6 +5,7 @@ from typing import Any, Literal
 from pydantic import BaseModel
 
 from app import db
+from app.agents.resolvers import AppointmentResolution, ClientResolution
 from app.config import get_settings
 from app.llm import make_llm
 
@@ -24,11 +25,19 @@ class ProposedAppointment(BaseModel):
 
 
 @dataclass
+class Clarification:
+    stage: str  # "client" | "appointment"
+    candidates: list[dict[str, Any]]
+    prompt: str  # encabezado humano ("Hay varios clientes…" / "…tiene varios turnos…")
+
+
+@dataclass
 class ProposalResult:
     proposed_action: dict[str, Any] | None
     abstained: bool
     message: str
     reason: str
+    clarification: Clarification | None = None
 
 
 def _gen_llm() -> Any:
@@ -65,6 +74,36 @@ async def _extract(question: str, now: datetime, gen_llm: Any) -> ProposedAppoin
 
 def _abstain(message: str, reason: str) -> ProposalResult:
     return ProposalResult(proposed_action=None, abstained=True, message=message, reason=reason)
+
+
+def clarify_or_abstain_client(res: ClientResolution) -> ProposalResult:
+    clar = (
+        Clarification("client", res.candidates, res.abstain_message)
+        if res.abstain_reason == "client_ambiguous"
+        else None
+    )
+    return ProposalResult(
+        None,
+        abstained=True,
+        message=res.abstain_message,
+        reason=res.abstain_reason,
+        clarification=clar,
+    )
+
+
+def clarify_or_abstain_appointment(res: AppointmentResolution) -> ProposalResult:
+    clar = (
+        Clarification("appointment", res.candidates, res.abstain_message)
+        if res.abstain_reason == "appointment_ambiguous"
+        else None
+    )
+    return ProposalResult(
+        None,
+        abstained=True,
+        message=res.abstain_message,
+        reason=res.abstain_reason,
+        clarification=clar,
+    )
 
 
 def _summary(params: dict[str, Any], start: datetime, end: datetime) -> str:
