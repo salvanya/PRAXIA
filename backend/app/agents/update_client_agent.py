@@ -4,7 +4,7 @@ from typing import Any, Literal
 from pydantic import BaseModel
 
 from app import db
-from app.agents.action_agent import ProposalResult
+from app.agents.action_agent import ProposalResult, clarify_or_abstain_client
 from app.agents.resolvers import resolve_single_client
 from app.config import get_settings
 from app.llm import make_llm
@@ -66,20 +66,29 @@ def _card_summary(client_name: str, changes: dict[str, str], before: dict[str, A
 
 
 async def propose_update_client(
-    question: str, practice_id: str, *, now: datetime, gen_llm: Any = None
+    question: str,
+    practice_id: str,
+    *,
+    now: datetime,
+    gen_llm: Any = None,
+    client_override: dict[str, Any] | None = None,
+    appointment_override: dict[str, Any] | None = None,  # ignorado; uniformidad del dispatch
 ) -> ProposalResult:
-    # `now` se acepta por uniformidad del dispatch (nodes.py lo pasa siempre); no se usa acá.
+    # `now` y `appointment_override` se aceptan por uniformidad del dispatch; no se usan acá.
     settings = get_settings()
     extracted = await _extract(question, gen_llm)
     if extracted is None:
         return _abstain(GENERIC_MESSAGE, "extract_failed")
 
-    resolution = await resolve_single_client(
-        practice_id, extracted.client_name, limit=settings.appt_name_match_limit
-    )
-    if resolution.client is None:
-        return _abstain(resolution.abstain_message, resolution.abstain_reason)
-    client = resolution.client
+    if client_override is not None:
+        client = client_override
+    else:
+        resolution = await resolve_single_client(
+            practice_id, extracted.client_name, limit=settings.appt_name_match_limit
+        )
+        if resolution.client is None:
+            return clarify_or_abstain_client(resolution)
+        client = resolution.client
 
     changes: dict[str, str] = {}
     if extracted.phone:
