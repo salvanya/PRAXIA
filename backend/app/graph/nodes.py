@@ -1,7 +1,7 @@
 from datetime import UTC, datetime
 from typing import Any
 
-from langchain_core.messages import AIMessage
+from langchain_core.messages import AIMessage, HumanMessage
 from langgraph.config import get_stream_writer
 from langgraph.types import interrupt
 
@@ -68,9 +68,20 @@ async def rag_node(state: AgentState) -> dict:
     }
 
 
+def _history_messages(state: AgentState, window: int) -> list[tuple[str, str]]:
+    out: list[tuple[str, str]] = []
+    for m in state["messages"][-window:]:
+        text = getattr(m, "content", "")
+        if not isinstance(text, str) or not text:
+            continue
+        out.append(("human" if isinstance(m, HumanMessage) else "ai", text))
+    return out
+
+
 async def chitchat_node(state: AgentState) -> dict:
     llm = _chitchat_llm()
-    messages = [("system", CHITCHAT_SYSTEM), ("human", last_user_text(state))]
+    window = get_settings().short_term_history_window
+    messages = [("system", CHITCHAT_SYSTEM), *_history_messages(state, window)]
     full = ""
     async for piece in llm.astream(messages):
         text = getattr(piece, "content", "")

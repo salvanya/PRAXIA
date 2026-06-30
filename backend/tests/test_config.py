@@ -23,3 +23,8 @@ def test_settings_have_sql_defaults() -> None:
     assert s.sql_row_limit == 200
     assert s.sql_timeout_ms == 5000
     assert s.sql_max_attempts == 2
+
+
+def test_short_term_history_window_default() -> None:
+    get_settings.cache_clear()
+    assert get_settings().short_term_history_window == 10

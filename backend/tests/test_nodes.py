@@ -1,3 +1,4 @@
+from langchain_core.messages import AIMessage, HumanMessage
 from langgraph.graph import END, START, StateGraph
 
 from app.graph import nodes
@@ -213,3 +214,28 @@ async def test_propose_action_classifier_exception_is_fail_closed(monkeypatch):
     tokens, sources = await _run(nodes.propose_action_node, new_state("agendá", "p", "t"))
     assert "agendar turnos" in tokens  # cae a 'unsupported' → mensaje de capacidades, sin crash
     assert sources == []
+
+
+async def test_chitchat_includes_recent_history(monkeypatch):
+    captured = {}
+
+    class FakeMsg:
+        def __init__(self, content):
+            self.content = content
+
+    class FakeLLM:
+        async def astream(self, messages):
+            captured["messages"] = messages
+            yield FakeMsg("ok")
+
+    monkeypatch.setattr(nodes, "_chitchat_llm", lambda: FakeLLM())
+    state = new_state("¿cómo me llamo?", "p", "t")
+    state["messages"] = [
+        HumanMessage(content="soy Ana"),
+        AIMessage(content="¡Hola Ana!"),
+        HumanMessage(content="¿cómo me llamo?"),
+    ]
+    await _run(nodes.chitchat_node, state)
+    assert captured["messages"][0] == ("system", nodes.CHITCHAT_SYSTEM)
+    assert ("human", "soy Ana") in captured["messages"]
+    assert ("ai", "¡Hola Ana!") in captured["messages"]

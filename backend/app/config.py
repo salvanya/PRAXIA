@@ -28,6 +28,9 @@ class Settings(BaseSettings):
     sql_max_attempts: int = 2
     appt_default_duration_min: int = 30
     appt_name_match_limit: int = 5
+    short_term_history_window: int = (
+        10  # mensajes recientes que ve chitchat (ventana fija; running_summary = Fase 2)
+    )
 
     # Constants (not from env)
     qdrant_collection: ClassVar[str] = "praxia_chunks"
