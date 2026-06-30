@@ -15,8 +15,8 @@ ROUTER_PROMPT = (
     "(crear, registrar/anotar, editar/cancelar). "
     'Ej: "agendá un turno para mañana", "registrá que llamé a Ana", '
     '"marcá a Juan como inactivo".\n'
-    "- chitchat: saludo o charla trivial sin pedido concreto. "
-    'Ej: "hola", "gracias", "¿cómo estás?".\n'
+    "- chitchat: saludo, charla trivial o pregunta sobre lo conversado antes. "
+    'Ej: "hola", "gracias", "¿cómo estás?", "¿qué te dije?", "¿lo recordás?".\n'
     "- out_of_scope: fuera del dominio de la práctica (cocina, política, código, etc.). "
     'Ej: "¿cuál es la capital de Francia?", "escribime un poema".\n'
     "Respondé solo con la intención."
