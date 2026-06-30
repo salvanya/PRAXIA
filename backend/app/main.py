@@ -6,6 +6,7 @@ from uuid import uuid4
 
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from langchain_core.messages import HumanMessage
 from langgraph.types import Command
 from pydantic import BaseModel
 from sse_starlette.sse import EventSourceResponse
@@ -71,11 +72,20 @@ async def documents() -> list[dict]:
 
 class ChatRequest(BaseModel):
     message: str
+    thread_id: str | None = None
 
 
 class ResumeRequest(BaseModel):
     thread_id: str
     decision: Literal["confirm", "cancel"]
+
+
+def select_chat_input(snapshot_values: dict, message: str, practice_id: str, thread_id: str) -> Any:
+    """Primer turno (sin estado en el checkpoint) → state inicial completo; turno siguiente
+    → parche incremental (solo el mensaje), para no pisar pending_clarification/proposed_action."""
+    if snapshot_values:
+        return {"messages": [HumanMessage(content=message)]}
+    return new_state(message, practice_id=practice_id, thread_id=thread_id)
 
 
 async def _sse_event_stream(graph: Any, inp: Any, config: dict) -> AsyncIterator[dict]:
@@ -110,9 +120,15 @@ async def chat(req: ChatRequest, request: Request) -> EventSourceResponse:
 
     graph = getattr(request.app.state, "graph", None) or get_default_graph()
     s = get_settings()
-    state = new_state(req.message, practice_id=s.practice_id, thread_id=str(uuid4()))
-    config = {"configurable": {"thread_id": state["thread_id"]}}
-    return EventSourceResponse(_sse_event_stream(graph, state, config))
+    thread_id = req.thread_id or str(uuid4())
+    config = {"configurable": {"thread_id": thread_id}}
+    try:
+        snapshot = await graph.aget_state(config)
+        values = snapshot.values
+    except Exception:  # noqa: BLE001 - sin checkpointer (fallback get_default_graph) → arranca limpio
+        values = {}
+    inp = select_chat_input(values, req.message, s.practice_id, thread_id)
+    return EventSourceResponse(_sse_event_stream(graph, inp, config))
 
 
 @app.post("/chat/resume")
