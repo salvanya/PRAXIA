@@ -22,7 +22,7 @@ test("streamChat yields tokens, sources, done — even across split chunks", asy
   ])));
 
   const events = [];
-  for await (const ev of streamChat("¿hola?")) events.push(ev);
+  for await (const ev of streamChat("¿hola?", "t1")) events.push(ev);
 
   expect(events).toEqual([
     { type: "token", text: "Hola" },
@@ -43,7 +43,7 @@ test("streamChat parses CRLF line endings (real sse_starlette transport)", async
   ])));
 
   const events = [];
-  for await (const ev of streamChat("¿hola?")) events.push(ev);
+  for await (const ev of streamChat("¿hola?", "t1")) events.push(ev);
 
   expect(events).toEqual([
     { type: "token", text: "Hola" },
@@ -70,7 +70,7 @@ test("streamChat decodes a multibyte char split across read() chunks", async () 
   vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(stream, { status: 200 })));
 
   const events = [];
-  for await (const ev of streamChat("x")) events.push(ev);
+  for await (const ev of streamChat("x", "t1")) events.push(ev);
 
   expect(events).toEqual([{ type: "token", text: "€" }, { type: "done" }]);
 });
@@ -78,7 +78,7 @@ test("streamChat decodes a multibyte char split across read() chunks", async () 
 test("streamChat throws on non-ok response", async () => {
   vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("nope", { status: 503 })));
   await expect(async () => {
-    for await (const _ of streamChat("x")) { /* drain */ }
+    for await (const _ of streamChat("x", "t1")) { /* drain */ }
   }).rejects.toThrow();
 });
 
@@ -94,7 +94,7 @@ test("streamChat surfaces the server's friendly detail on 503", async () => {
     ),
   );
   await expect(async () => {
-    for await (const _ of streamChat("x")) { /* drain */ }
+    for await (const _ of streamChat("x", "t1")) { /* drain */ }
   }).rejects.toThrow(detail);
 });
 
@@ -105,12 +105,22 @@ test("streamChat yields a confirm event with threadId and action", async () => {
   ])));
 
   const events = [];
-  for await (const ev of streamChat("agendá")) events.push(ev);
+  for await (const ev of streamChat("agendá", "t1")) events.push(ev);
 
   expect(events).toEqual([
     { type: "confirm", threadId: "t1", action: { kind: "create_appointment", summary: "Crear turno: Ana", params: {} } },
     { type: "done" },
   ]);
+});
+
+test("streamChat posts message and thread_id", async () => {
+  const fetchMock = vi.fn().mockResolvedValue(sseResponse(["event: done\ndata: [DONE]\n\n"]));
+  vi.stubGlobal("fetch", fetchMock);
+  for await (const _ of streamChat("hola", "tid-1")) { /* drain */ }
+  expect(fetchMock).toHaveBeenCalledWith("/api/chat", expect.objectContaining({
+    method: "POST",
+    body: JSON.stringify({ message: "hola", thread_id: "tid-1" }),
+  }));
 });
 
 test("resumeChat posts thread_id and decision to /api/chat/resume", async () => {

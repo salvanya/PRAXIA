@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useRef } from "react";
 import {
   useLocalRuntime,
   type ChatModelAdapter,
@@ -35,6 +35,8 @@ function sourcesBlock(sources: Source[]): string {
 }
 
 export function useChatRuntime(onConfirm?: (p: PendingAction) => void) {
+  const threadIdRef = useRef<string | undefined>(undefined);
+  if (!threadIdRef.current) threadIdRef.current = crypto.randomUUID();
   const adapter = useMemo<ChatModelAdapter>(
     () => ({
       async *run({ messages, abortSignal }: ChatModelRunOptions): AsyncGenerator<ChatModelRunResult, void> {
@@ -43,7 +45,7 @@ export function useChatRuntime(onConfirm?: (p: PendingAction) => void) {
         let sources: Source[] = [];
 
         try {
-          for await (const ev of streamChat(query, abortSignal)) {
+          for await (const ev of streamChat(query, threadIdRef.current!, abortSignal)) {
             if (ev.type === "token") {
               answer += ev.text;
               yield { content: [{ type: "text", text: answer }] };

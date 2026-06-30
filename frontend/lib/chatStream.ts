@@ -77,8 +77,12 @@ async function* streamSSE(
   }
 }
 
-export function streamChat(message: string, signal?: AbortSignal): AsyncGenerator<ChatEvent> {
-  return streamSSE("/api/chat", { message }, signal);
+export function streamChat(
+  message: string,
+  threadId: string,
+  signal?: AbortSignal,
+): AsyncGenerator<ChatEvent> {
+  return streamSSE("/api/chat", { message, thread_id: threadId }, signal);
 }
 
 export function resumeChat(
