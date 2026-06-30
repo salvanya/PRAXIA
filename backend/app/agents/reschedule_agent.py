@@ -3,7 +3,11 @@ from typing import Any
 
 from pydantic import BaseModel
 
-from app.agents.action_agent import ProposalResult
+from app.agents.action_agent import (
+    ProposalResult,
+    clarify_or_abstain_appointment,
+    clarify_or_abstain_client,
+)
 from app.agents.resolvers import resolve_single_appointment, resolve_single_client
 from app.config import get_settings
 from app.llm import make_llm
@@ -72,19 +76,28 @@ def _card_summary(
 
 
 async def propose_reschedule(
-    question: str, practice_id: str, *, now: datetime, gen_llm: Any = None
+    question: str,
+    practice_id: str,
+    *,
+    now: datetime,
+    gen_llm: Any = None,
+    client_override: dict[str, Any] | None = None,
+    appointment_override: dict[str, Any] | None = None,
 ) -> ProposalResult:
     settings = get_settings()
     extracted = await _extract(question, now, gen_llm)
     if extracted is None:
         return _abstain(GENERIC_MESSAGE, "extract_failed")
 
-    resolution = await resolve_single_client(
-        practice_id, extracted.client_name, limit=settings.appt_name_match_limit
-    )
-    if resolution.client is None:
-        return _abstain(resolution.abstain_message, resolution.abstain_reason)
-    client = resolution.client
+    if client_override is not None:
+        client = client_override
+    else:
+        resolution = await resolve_single_client(
+            practice_id, extracted.client_name, limit=settings.appt_name_match_limit
+        )
+        if resolution.client is None:
+            return clarify_or_abstain_client(resolution)
+        client = resolution.client
 
     # new_start_at es obligatorio: si no parsea, no se puede reprogramar (no se degrada).
     try:
@@ -104,12 +117,15 @@ async def propose_reschedule(
         )
 
     current_when = _parse_when(extracted.current_when)
-    appt_res = await resolve_single_appointment(
-        practice_id, client, current_when, now=now, limit=settings.appt_name_match_limit
-    )
-    if appt_res.appointment is None:
-        return _abstain(appt_res.abstain_message, appt_res.abstain_reason)
-    appt = appt_res.appointment
+    if appointment_override is not None:
+        appt = appointment_override
+    else:
+        appt_res = await resolve_single_appointment(
+            practice_id, client, current_when, now=now, limit=settings.appt_name_match_limit
+        )
+        if appt_res.appointment is None:
+            return clarify_or_abstain_appointment(appt_res)
+        appt = appt_res.appointment
     old_start = appt["start_at"]
     new_end = new_start + (appt["end_at"] - old_start)  # preserva la duración original
 

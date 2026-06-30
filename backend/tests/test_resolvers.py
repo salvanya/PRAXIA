@@ -34,6 +34,7 @@ async def test_ambiguous(monkeypatch) -> None:
     _patch(monkeypatch, [{"id": "1", "full_name": "Ana A"}, {"id": "2", "full_name": "Ana B"}])
     r = await resolvers.resolve_single_client("pid", "Ana", limit=5)
     assert r.client is None and r.abstain_reason == "client_ambiguous"
+    assert [c["id"] for c in r.candidates] == ["1", "2"]
 
 
 NOW = datetime(2026, 6, 29, 9, 0, tzinfo=UTC)
@@ -82,6 +83,7 @@ async def test_appt_many_no_hint_ambiguous(monkeypatch) -> None:
     r = await resolvers.resolve_single_appointment("pid", CLIENT, None, now=NOW, limit=5)
     assert r.appointment is None and r.abstain_reason == "appointment_ambiguous"
     assert "Ana López" in r.abstain_message
+    assert [a["id"] for a in r.candidates] == ["a1", "a2"]
 
 
 async def test_appt_hint_filters_to_one(monkeypatch) -> None:
@@ -143,3 +145,9 @@ async def test_appt_time_matches_none_falls_back_to_day_ambiguous(monkeypatch) -
     r = await resolvers.resolve_single_appointment("pid", CLIENT, when, now=NOW, limit=5)
     assert r.appointment is None and r.abstain_reason == "appointment_ambiguous"
     assert "01/07 10:00" in r.abstain_message and "01/07 15:00" in r.abstain_message
+
+
+async def test_single_client_has_no_candidates(monkeypatch) -> None:
+    _patch(monkeypatch, [{"id": "c1", "full_name": "Ana"}])
+    r = await resolvers.resolve_single_client("pid", "Ana", limit=5)
+    assert r.candidates == []

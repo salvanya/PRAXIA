@@ -110,3 +110,35 @@ async def test_abstains_when_extract_fails() -> None:
 
     result = await interaction_agent.propose_interaction("registrá", "pid", now=NOW, gen_llm=_LLM())
     assert result.abstained and result.reason == "extract_failed"
+
+
+async def test_interaction_client_override_skips_resolution(monkeypatch) -> None:
+    called = {"clients": False}
+
+    async def _find_clients(*a, **k):  # type: ignore[no-untyped-def]
+        called["clients"] = True
+        return []
+
+    monkeypatch.setattr(db, "find_clients_by_name", _find_clients)
+    llm = FakeGenLLM(ProposedInteraction(client_name="Ana", type="nota", summary="s", content="c"))
+    result = await interaction_agent.propose_interaction(
+        "registrá una nota de Ana",
+        "pid",
+        now=NOW,
+        gen_llm=llm,
+        client_override={"id": "c1", "full_name": "Ana López"},
+    )
+    assert not called["clients"] and result.proposed_action is not None
+
+
+async def test_interaction_client_ambiguous_clarification(monkeypatch) -> None:
+    async def _find_clients(practice_id, name, *, limit):  # type: ignore[no-untyped-def]
+        return [{"id": "1", "full_name": "Ana A"}, {"id": "2", "full_name": "Ana B"}]
+
+    monkeypatch.setattr(db, "find_clients_by_name", _find_clients)
+    llm = FakeGenLLM(ProposedInteraction(client_name="Ana", type="nota", summary="s", content="c"))
+    result = await interaction_agent.propose_interaction(
+        "registrá una nota de Ana", "pid", now=NOW, gen_llm=llm
+    )
+    assert result.clarification is not None and result.clarification.stage == "client"
+    assert result.clarification.candidates[0]["id"] == "1"

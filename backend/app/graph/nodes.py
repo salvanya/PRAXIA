@@ -1,10 +1,12 @@
 from datetime import UTC, datetime
 from typing import Any
 
-from langchain_core.messages import AIMessage
+from langchain_core.messages import AIMessage, HumanMessage
 from langgraph.config import get_stream_writer
 from langgraph.types import interrupt
 
+from app.agents.choice_agent import resolve_choice
+from app.agents.resolvers import _format_candidate
 from app.agents.sql_agent import answer_structured
 from app.agents.sql_present import synthesize_sql_answer
 from app.agents.write_tools import REGISTRY, classify_write_action
@@ -68,9 +70,22 @@ async def rag_node(state: AgentState) -> dict:
     }
 
 
+def _history_messages(state: AgentState, window: int) -> list[tuple[str, str]]:
+    out: list[tuple[str, str]] = []
+    # window=0 significa "sin historial" — [-0:] sería lista completa (bug silencioso).
+    tail = state["messages"][-window:] if window > 0 else []
+    for m in tail:
+        text = getattr(m, "content", "")
+        if not isinstance(text, str) or not text:
+            continue
+        out.append(("human" if isinstance(m, HumanMessage) else "ai", text))
+    return out
+
+
 async def chitchat_node(state: AgentState) -> dict:
     llm = _chitchat_llm()
-    messages = [("system", CHITCHAT_SYSTEM), ("human", last_user_text(state))]
+    window = get_settings().short_term_history_window
+    messages = [("system", CHITCHAT_SYSTEM), *_history_messages(state, window)]
     full = ""
     async for piece in llm.astream(messages):
         text = getattr(piece, "content", "")
@@ -106,6 +121,70 @@ async def sql_node(state: AgentState) -> dict:
     }
 
 
+def _numbered(candidates: list[dict], stage: str) -> str:
+    lines = []
+    for i, c in enumerate(candidates, 1):
+        label = c["full_name"] if stage == "client" else _format_candidate(c)
+        lines.append(f"{i}. {label}")
+    return "\n".join(lines)
+
+
+def _handle_proposal_result(result: Any, *, kind: str, question: str, overrides: dict) -> dict:
+    if result.clarification is not None:
+        clar = result.clarification
+        pending = {
+            "kind": kind,
+            "stage": clar.stage,
+            "candidates": clar.candidates,
+            "question": question,
+            "overrides": overrides,
+        }
+        numbered = _numbered(clar.candidates, clar.stage)
+        msg = f"{clar.prompt}:\n{numbered}\n¿Cuál? Respondé con el número."
+        write_token(msg)
+        write_sources([])
+        return {
+            "pending_clarification": pending,
+            "proposed_action": None,
+            "sources": [],
+            "messages": [AIMessage(content=msg)],
+        }
+    if result.abstained:
+        write_token(result.message)
+        write_sources([])
+        return {
+            "pending_clarification": None,
+            "proposed_action": None,
+            "sources": [],
+            "messages": [AIMessage(content=result.message)],
+        }
+    return {"pending_clarification": None, "proposed_action": result.proposed_action}
+
+
+async def clarify_node(state: AgentState) -> dict:
+    pending = state["pending_clarification"]
+    assert pending is not None  # entry_route garantiza no-None acá
+    candidates = pending["candidates"]
+    reply = last_user_text(state)
+    idx = await resolve_choice(_numbered(candidates, pending["stage"]), reply, n=len(candidates))
+    if not 1 <= idx <= len(candidates):
+        msg = "No identifiqué cuál; volvé a pedírmelo indicando la fecha o el nombre completo."
+        write_token(msg)
+        write_sources([])
+        return {"pending_clarification": None, "sources": [], "messages": [AIMessage(content=msg)]}
+    overrides = {**pending["overrides"], pending["stage"]: candidates[idx - 1]}
+    result = await REGISTRY[pending["kind"]].propose(
+        pending["question"],
+        state["practice_id"],
+        now=datetime.now(UTC),
+        client_override=overrides.get("client"),
+        appointment_override=overrides.get("appointment"),
+    )
+    return _handle_proposal_result(
+        result, kind=pending["kind"], question=pending["question"], overrides=overrides
+    )
+
+
 async def propose_action_node(state: AgentState) -> dict:
     question = last_user_text(state)
     try:
@@ -120,17 +199,14 @@ async def propose_action_node(state: AgentState) -> dict:
         )
         write_token(msg)
         write_sources([])
-        return {"proposed_action": None, "sources": [], "messages": [AIMessage(content=msg)]}
-    result = await REGISTRY[kind].propose(question, state["practice_id"], now=datetime.now(UTC))
-    if result.abstained:
-        write_token(result.message)
-        write_sources([])
         return {
             "proposed_action": None,
+            "pending_clarification": None,
             "sources": [],
-            "messages": [AIMessage(content=result.message)],
+            "messages": [AIMessage(content=msg)],
         }
-    return {"proposed_action": result.proposed_action}
+    result = await REGISTRY[kind].propose(question, state["practice_id"], now=datetime.now(UTC))
+    return _handle_proposal_result(result, kind=kind, question=question, overrides={})
 
 
 async def confirm_action_node(state: AgentState) -> dict:
@@ -145,4 +221,4 @@ async def confirm_action_node(state: AgentState) -> dict:
         msg = tool.cancel_message
     write_token(msg)
     write_sources([])
-    return {"sources": [], "messages": [AIMessage(content=msg)]}
+    return {"sources": [], "proposed_action": None, "messages": [AIMessage(content=msg)]}

@@ -17,3 +17,10 @@ def route(state: AgentState) -> str:
 
 def route_after_propose(state: AgentState) -> str:
     return "confirm_action" if state.get("proposed_action") else END
+
+
+def entry_route(state: AgentState) -> str:
+    return "clarify" if state.get("pending_clarification") else "router"
+
+
+route_after_clarify = route_after_propose

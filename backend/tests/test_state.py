@@ -40,3 +40,7 @@ def test_appointment_config_defaults() -> None:
     s = get_settings()
     assert s.appt_default_duration_min == 30
     assert s.appt_name_match_limit == 5
+
+
+def test_new_state_inits_pending_clarification_none() -> None:
+    assert new_state("hola", "pid", "tid")["pending_clarification"] is None

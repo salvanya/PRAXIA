@@ -35,7 +35,14 @@ def _patch(monkeypatch, clients, current):  # type: ignore[no-untyped-def]
 
 
 _CLIENT = [{"id": "c1", "full_name": "Ana López"}]
-_CURRENT = {"id": "c1", "full_name": "Ana López", "phone": "11-1111-1111", "email": None, "status": "activo", "dob": None}
+_CURRENT = {
+    "id": "c1",
+    "full_name": "Ana López",
+    "phone": "11-1111-1111",
+    "email": None,
+    "status": "activo",
+    "dob": None,
+}
 
 
 async def test_happy_single_field(monkeypatch) -> None:
@@ -114,3 +121,38 @@ async def test_invalid_dob_alone_abstains(monkeypatch) -> None:
         "cambiá la fecha de nacimiento de Ana", "pid", now=NOW, gen_llm=llm
     )
     assert result.abstained and result.reason == "no_fields"
+
+
+async def test_update_client_override_skips_resolution(monkeypatch) -> None:
+    called = {"clients": False}
+
+    async def _find_clients(*a, **k):  # type: ignore[no-untyped-def]
+        called["clients"] = True
+        return []
+
+    async def _get_client(practice_id, cid):  # type: ignore[no-untyped-def]
+        return {}
+
+    monkeypatch.setattr(db, "find_clients_by_name", _find_clients)
+    monkeypatch.setattr(db, "get_client", _get_client)
+    llm = FakeGenLLM(ProposedClientUpdate(client_name="Ana", phone="11-2233-4455"))
+    result = await update_client_agent.propose_update_client(
+        "cambiá el teléfono de Ana",
+        "pid",
+        now=NOW,
+        gen_llm=llm,
+        client_override={"id": "c1", "full_name": "Ana López"},
+    )
+    assert not called["clients"] and result.proposed_action is not None
+
+
+async def test_update_client_ambiguous_clarification(monkeypatch) -> None:
+    async def _find_clients(practice_id, name, *, limit):  # type: ignore[no-untyped-def]
+        return [{"id": "1", "full_name": "Ana A"}, {"id": "2", "full_name": "Ana B"}]
+
+    monkeypatch.setattr(db, "find_clients_by_name", _find_clients)
+    llm = FakeGenLLM(ProposedClientUpdate(client_name="Ana", phone="11-2233-4455"))
+    result = await update_client_agent.propose_update_client(
+        "cambiá el teléfono de Ana", "pid", now=NOW, gen_llm=llm
+    )
+    assert result.clarification is not None and result.clarification.stage == "client"

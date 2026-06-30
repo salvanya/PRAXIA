@@ -3,7 +3,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel
 
-from app.agents.action_agent import ProposalResult
+from app.agents.action_agent import ProposalResult, clarify_or_abstain_client
 from app.agents.resolvers import resolve_single_client
 from app.config import get_settings
 from app.llm import make_llm
@@ -54,7 +54,13 @@ def _card_summary(client_name: str, type_: str, summary: str) -> str:
 
 
 async def propose_interaction(
-    question: str, practice_id: str, *, now: datetime, gen_llm: Any = None
+    question: str,
+    practice_id: str,
+    *,
+    now: datetime,
+    gen_llm: Any = None,
+    client_override: dict[str, Any] | None = None,
+    appointment_override: dict[str, Any] | None = None,  # ignorado; uniformidad del dispatch
 ) -> ProposalResult:
     settings = get_settings()
     extracted = await _extract(question, gen_llm)
@@ -63,17 +69,15 @@ async def propose_interaction(
             proposed_action=None, abstained=True, message=GENERIC_MESSAGE, reason="extract_failed"
         )
 
-    resolution = await resolve_single_client(
-        practice_id, extracted.client_name, limit=settings.appt_name_match_limit
-    )
-    if resolution.client is None:
-        return ProposalResult(
-            proposed_action=None,
-            abstained=True,
-            message=resolution.abstain_message,
-            reason=resolution.abstain_reason,
+    if client_override is not None:
+        client = client_override
+    else:
+        resolution = await resolve_single_client(
+            practice_id, extracted.client_name, limit=settings.appt_name_match_limit
         )
-    client = resolution.client
+        if resolution.client is None:
+            return clarify_or_abstain_client(resolution)
+        client = resolution.client
 
     params: dict[str, Any] = {
         "client_id": client["id"],

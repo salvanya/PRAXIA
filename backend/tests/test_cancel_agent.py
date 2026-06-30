@@ -98,3 +98,72 @@ async def test_unparseable_when_degrades_to_no_hint(monkeypatch) -> None:
     assert not result.abstained  # when ilegible → None → resolver usa el único candidato
     assert result.proposed_action is not None
     assert result.proposed_action["params"]["appointment_id"] == "a1"
+
+
+async def test_client_override_skips_client_resolution(monkeypatch) -> None:
+    called = {"clients": False}
+
+    async def _find_clients(*a, **k):  # type: ignore[no-untyped-def]
+        called["clients"] = True
+        return []
+
+    async def _find_appts(practice_id, client_id, *, now, limit):  # type: ignore[no-untyped-def]
+        return [_appt()]
+
+    monkeypatch.setattr(db, "find_clients_by_name", _find_clients)
+    monkeypatch.setattr(db, "find_cancellable_appointments", _find_appts)
+    llm = FakeGenLLM(ProposedCancellation(client_name="Ana"))
+    result = await cancel_agent.propose_cancellation(
+        "cancelá el turno de Ana",
+        "pid",
+        now=NOW,
+        gen_llm=llm,
+        client_override={"id": "c1", "full_name": "Ana López"},
+    )
+    assert not called["clients"]
+    assert result.proposed_action is not None
+    assert result.proposed_action["params"]["appointment_id"] == "a1"
+
+
+async def test_client_ambiguous_returns_clarification(monkeypatch) -> None:
+    _patch(monkeypatch, [{"id": "1", "full_name": "Ana A"}, {"id": "2", "full_name": "Ana B"}], [])
+    llm = FakeGenLLM(ProposedCancellation(client_name="Ana"))
+    result = await cancel_agent.propose_cancellation(
+        "cancelá el turno de Ana", "pid", now=NOW, gen_llm=llm
+    )
+    assert result.clarification is not None and result.clarification.stage == "client"
+    assert len(result.clarification.candidates) == 2
+
+
+async def test_appointment_ambiguous_returns_clarification(monkeypatch) -> None:
+    _patch(
+        monkeypatch,
+        [{"id": "c1", "full_name": "Ana López"}],
+        [_appt("a1"), _appt("a2", datetime(2026, 7, 2, 11, 0, tzinfo=UTC))],
+    )
+    llm = FakeGenLLM(ProposedCancellation(client_name="Ana"))
+    result = await cancel_agent.propose_cancellation(
+        "cancelá el turno de Ana", "pid", now=NOW, gen_llm=llm
+    )
+    assert result.clarification is not None and result.clarification.stage == "appointment"
+    assert len(result.clarification.candidates) == 2
+
+
+async def test_appointment_override_skips_appt_resolution(monkeypatch) -> None:
+    called = {"appts": False}
+
+    async def _find_clients(practice_id, name, *, limit):  # type: ignore[no-untyped-def]
+        return [{"id": "c1", "full_name": "Ana López"}]
+
+    async def _find_appts(*a, **k):  # type: ignore[no-untyped-def]
+        called["appts"] = True
+        return []
+
+    monkeypatch.setattr(db, "find_clients_by_name", _find_clients)
+    monkeypatch.setattr(db, "find_cancellable_appointments", _find_appts)
+    llm = FakeGenLLM(ProposedCancellation(client_name="Ana"))
+    result = await cancel_agent.propose_cancellation(
+        "cancelá el turno de Ana", "pid", now=NOW, gen_llm=llm, appointment_override=_appt("aX")
+    )
+    assert not called["appts"]
+    assert result.proposed_action["params"]["appointment_id"] == "aX"

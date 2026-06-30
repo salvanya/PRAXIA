@@ -1,3 +1,4 @@
+from langchain_core.messages import AIMessage, HumanMessage
 from langgraph.graph import END, START, StateGraph
 
 from app.graph import nodes
@@ -25,6 +26,26 @@ async def _run(node, state):
         elif chunk["kind"] == "sources":
             sources = chunk["sources"]
     return tokens, sources
+
+
+async def _final(node, state):
+    """Corre un nodo y devuelve el AgentState final (parche aplicado)."""
+    graph = _one_node_graph(node)
+    return await graph.ainvoke(state)
+
+
+def _appt_cand(aid="a1", dt=None):
+    from datetime import UTC, datetime
+
+    dt = dt or datetime(2026, 7, 1, 14, 0, tzinfo=UTC)
+    return {
+        "id": aid,
+        "start_at": dt,
+        "end_at": dt,
+        "status": "programado",
+        "practitioner_id": "p1",
+        "practitioner_full_name": "Dra. Gómez",
+    }
 
 
 def _chunk() -> Chunk:
@@ -213,3 +234,233 @@ async def test_propose_action_classifier_exception_is_fail_closed(monkeypatch):
     tokens, sources = await _run(nodes.propose_action_node, new_state("agendá", "p", "t"))
     assert "agendar turnos" in tokens  # cae a 'unsupported' → mensaje de capacidades, sin crash
     assert sources == []
+
+
+async def test_chitchat_includes_recent_history(monkeypatch):
+    captured = {}
+
+    class FakeMsg:
+        def __init__(self, content):
+            self.content = content
+
+    class FakeLLM:
+        async def astream(self, messages):
+            captured["messages"] = messages
+            yield FakeMsg("ok")
+
+    monkeypatch.setattr(nodes, "_chitchat_llm", lambda: FakeLLM())
+    state = new_state("¿cómo me llamo?", "p", "t")
+    state["messages"] = [
+        HumanMessage(content="soy Ana"),
+        AIMessage(content="¡Hola Ana!"),
+        HumanMessage(content="¿cómo me llamo?"),
+    ]
+    await _run(nodes.chitchat_node, state)
+    assert captured["messages"][0] == ("system", nodes.CHITCHAT_SYSTEM)
+    assert ("human", "soy Ana") in captured["messages"]
+    assert ("ai", "¡Hola Ana!") in captured["messages"]
+
+
+async def test_chitchat_window_zero_sends_no_history(monkeypatch):
+    """Fix 3: short_term_history_window=0 debe enviar SOLO el system message (sin historial).
+    Antes del fix, [-0:] == lista completa → se incluía todo el historial (bug silencioso)."""
+    captured = {}
+
+    class FakeMsg:
+        def __init__(self, content):
+            self.content = content
+
+    class FakeLLM:
+        async def astream(self, messages):
+            captured["messages"] = messages
+            yield FakeMsg("ok")
+
+    monkeypatch.setattr(nodes, "_chitchat_llm", lambda: FakeLLM())
+
+    # Forzar window=0 sin cambiar el env: parcheamos get_settings devolviendo un Settings
+    # con short_term_history_window=0.
+    from app.config import Settings
+
+    monkeypatch.setattr(nodes, "get_settings", lambda: Settings(short_term_history_window=0))
+
+    state = new_state("hola", "p", "t")
+    state["messages"] = [
+        HumanMessage(content="soy Ana"),
+        AIMessage(content="¡Hola Ana!"),
+        HumanMessage(content="hola"),
+    ]
+    await _run(nodes.chitchat_node, state)
+    # Solo debe llegar el system prompt, sin ningún turno de historial.
+    assert captured["messages"] == [
+        ("system", nodes.CHITCHAT_SYSTEM)
+    ], f"window=0 no debe incluir historial, pero se recibió: {captured['messages']}"
+
+
+async def test_propose_action_clarification_sets_pending(monkeypatch):
+    from app.agents import write_tools
+    from app.agents.action_agent import Clarification, ProposalResult
+
+    async def _clf(question, llm=None):
+        return "cancel_appointment"
+
+    async def _propose(question, practice_id, *, now, gen_llm=None, **kw):
+        return ProposalResult(
+            None,
+            abstained=True,
+            message="m",
+            reason="appointment_ambiguous",
+            clarification=Clarification(
+                "appointment", [_appt_cand("a1"), _appt_cand("a2")], "Tiene varios turnos"
+            ),
+        )
+
+    monkeypatch.setattr(nodes, "classify_write_action", _clf)
+    monkeypatch.setitem(
+        write_tools.REGISTRY,
+        "cancel_appointment",
+        write_tools.WriteTool(
+            kind="cancel_appointment",
+            propose=_propose,
+            write=write_tools._write_cancel,
+            format_receipt=write_tools.format_cancel_receipt,
+            cancel_message="x",
+        ),
+    )
+    out = await _final(nodes.propose_action_node, new_state("cancelá", "p", "t"))
+    pending = out["pending_clarification"]
+    assert pending["stage"] == "appointment" and len(pending["candidates"]) == 2
+    assert pending["kind"] == "cancel_appointment" and pending["overrides"] == {}
+
+
+async def test_clarify_maps_and_proposes(monkeypatch):
+    from app.agents import write_tools
+    from app.agents.action_agent import ProposalResult
+
+    action = {"kind": "cancel_appointment", "summary": "s", "params": {"appointment_id": "a1"}}
+
+    async def _choice(numbered, reply, *, n, gen_llm=None):
+        return 1
+
+    async def _propose(
+        question,
+        practice_id,
+        *,
+        now,
+        gen_llm=None,
+        client_override=None,
+        appointment_override=None,
+    ):
+        assert appointment_override is not None  # el slot elegido se pasó como override
+        return ProposalResult(proposed_action=action, abstained=False, message="", reason="ok")
+
+    monkeypatch.setattr(nodes, "resolve_choice", _choice)
+    monkeypatch.setitem(
+        write_tools.REGISTRY,
+        "cancel_appointment",
+        write_tools.WriteTool(
+            kind="cancel_appointment",
+            propose=_propose,
+            write=write_tools._write_cancel,
+            format_receipt=write_tools.format_cancel_receipt,
+            cancel_message="x",
+        ),
+    )
+    state = new_state("el primero", "p", "t")
+    state["pending_clarification"] = {
+        "kind": "cancel_appointment",
+        "stage": "appointment",
+        "candidates": [_appt_cand("a1")],
+        "question": "cancelá el turno de Ana",
+        "overrides": {},
+    }
+    out = await _final(nodes.clarify_node, state)
+    assert out["proposed_action"] == action and out["pending_clarification"] is None
+
+
+async def test_clarify_no_match_clears_and_retries(monkeypatch):
+    async def _choice(numbered, reply, *, n, gen_llm=None):
+        return 0  # no mapea
+
+    called = {"propose": False}
+
+    async def _propose(*a, **k):
+        called["propose"] = True
+
+    from app.agents import write_tools
+
+    monkeypatch.setattr(nodes, "resolve_choice", _choice)
+    monkeypatch.setitem(
+        write_tools.REGISTRY,
+        "cancel_appointment",
+        write_tools.WriteTool(
+            kind="cancel_appointment",
+            propose=_propose,
+            write=write_tools._write_cancel,
+            format_receipt=write_tools.format_cancel_receipt,
+            cancel_message="x",
+        ),
+    )
+    state = new_state("cualquier cosa", "p", "t")
+    state["pending_clarification"] = {
+        "kind": "cancel_appointment",
+        "stage": "client",
+        "candidates": [{"id": "1", "full_name": "Ana A"}, {"id": "2", "full_name": "Ana B"}],
+        "question": "cancelá el turno de Ana",
+        "overrides": {},
+    }
+    out = await _final(nodes.clarify_node, state)
+    assert out["pending_clarification"] is None and not called["propose"]
+    assert "No identifiqué" in out["messages"][-1].content
+
+
+async def test_clarify_chains_client_then_appointment(monkeypatch):
+    from app.agents import write_tools
+    from app.agents.action_agent import Clarification, ProposalResult
+
+    async def _choice(numbered, reply, *, n, gen_llm=None):
+        return 1
+
+    async def _propose(
+        question,
+        practice_id,
+        *,
+        now,
+        gen_llm=None,
+        client_override=None,
+        appointment_override=None,
+    ):
+        assert client_override is not None  # el cliente elegido se fijó
+        return ProposalResult(
+            None,
+            abstained=True,
+            message="m",
+            reason="appointment_ambiguous",
+            clarification=Clarification(
+                "appointment", [_appt_cand("a1"), _appt_cand("a2")], "Tiene varios"
+            ),
+        )
+
+    monkeypatch.setattr(nodes, "resolve_choice", _choice)
+    monkeypatch.setitem(
+        write_tools.REGISTRY,
+        "cancel_appointment",
+        write_tools.WriteTool(
+            kind="cancel_appointment",
+            propose=_propose,
+            write=write_tools._write_cancel,
+            format_receipt=write_tools.format_cancel_receipt,
+            cancel_message="x",
+        ),
+    )
+    state = new_state("la González", "p", "t")
+    state["pending_clarification"] = {
+        "kind": "cancel_appointment",
+        "stage": "client",
+        "candidates": [{"id": "1", "full_name": "Ana A"}, {"id": "2", "full_name": "Ana B"}],
+        "question": "cancelá el turno de Ana",
+        "overrides": {},
+    }
+    out = await _final(nodes.clarify_node, state)
+    pending = out["pending_clarification"]
+    assert pending["stage"] == "appointment"
+    assert pending["overrides"]["client"] == {"id": "1", "full_name": "Ana A"}
