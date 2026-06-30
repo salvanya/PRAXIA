@@ -126,3 +126,44 @@ async def test_unparseable_current_when_degrades(monkeypatch) -> None:
     assert not result.abstained  # current_when ilegible → None → resolver usa el único candidato
     assert result.proposed_action is not None
     assert result.proposed_action["params"]["appointment_id"] == "a1"
+
+
+async def test_reschedule_client_override_skips_resolution(monkeypatch) -> None:
+    called = {"clients": False}
+
+    async def _find_clients(*a, **k):  # type: ignore[no-untyped-def]
+        called["clients"] = True
+        return []
+
+    async def _find_appts(practice_id, client_id, *, now, limit):  # type: ignore[no-untyped-def]
+        return [_appt()]  # helper local del archivo
+
+    monkeypatch.setattr(db, "find_clients_by_name", _find_clients)
+    monkeypatch.setattr(db, "find_cancellable_appointments", _find_appts)
+    llm = FakeGenLLM(ProposedReschedule(client_name="Ana", new_start_at="2026-07-05T15:00:00"))
+    result = await reschedule_agent.propose_reschedule(
+        "reprogramá el turno de Ana al 5/7 15:00",
+        "pid",
+        now=NOW,
+        gen_llm=llm,
+        client_override={"id": "c1", "full_name": "Ana López"},
+    )
+    assert not called["clients"] and result.proposed_action is not None
+
+
+async def test_reschedule_client_ambiguous_clarification(monkeypatch) -> None:
+    _patch(monkeypatch, [{"id": "1", "full_name": "Ana A"}, {"id": "2", "full_name": "Ana B"}], [])
+    llm = FakeGenLLM(ProposedReschedule(client_name="Ana", new_start_at="2026-07-05T15:00:00"))
+    result = await reschedule_agent.propose_reschedule("reprogramá", "pid", now=NOW, gen_llm=llm)
+    assert result.clarification is not None and result.clarification.stage == "client"
+
+
+async def test_reschedule_appointment_ambiguous_clarification(monkeypatch) -> None:
+    _patch(
+        monkeypatch,
+        [{"id": "c1", "full_name": "Ana López"}],
+        [_appt("a1"), _appt("a2", datetime(2026, 7, 2, 11, 0, tzinfo=UTC))],
+    )
+    llm = FakeGenLLM(ProposedReschedule(client_name="Ana", new_start_at="2026-07-05T15:00:00"))
+    result = await reschedule_agent.propose_reschedule("reprogramá", "pid", now=NOW, gen_llm=llm)
+    assert result.clarification is not None and result.clarification.stage == "appointment"
