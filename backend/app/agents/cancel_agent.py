@@ -3,7 +3,11 @@ from typing import Any
 
 from pydantic import BaseModel
 
-from app.agents.action_agent import ProposalResult
+from app.agents.action_agent import (
+    ProposalResult,
+    clarify_or_abstain_appointment,
+    clarify_or_abstain_client,
+)
 from app.agents.resolvers import resolve_single_appointment, resolve_single_client
 from app.config import get_settings
 from app.llm import make_llm
@@ -50,26 +54,30 @@ def _card_summary(client_name: str, practitioner_name: str, start: datetime) -> 
 
 
 async def propose_cancellation(
-    question: str, practice_id: str, *, now: datetime, gen_llm: Any = None
+    question: str,
+    practice_id: str,
+    *,
+    now: datetime,
+    gen_llm: Any = None,
+    client_override: dict[str, Any] | None = None,
+    appointment_override: dict[str, Any] | None = None,
 ) -> ProposalResult:
     settings = get_settings()
     extracted = await _extract(question, now, gen_llm)
     if extracted is None:
         return ProposalResult(
-            proposed_action=None, abstained=True, message=GENERIC_MESSAGE, reason="extract_failed"
+            None, abstained=True, message=GENERIC_MESSAGE, reason="extract_failed"
         )
 
-    resolution = await resolve_single_client(
-        practice_id, extracted.client_name, limit=settings.appt_name_match_limit
-    )
-    if resolution.client is None:
-        return ProposalResult(
-            proposed_action=None,
-            abstained=True,
-            message=resolution.abstain_message,
-            reason=resolution.abstain_reason,
+    if client_override is not None:
+        client = client_override
+    else:
+        resolution = await resolve_single_client(
+            practice_id, extracted.client_name, limit=settings.appt_name_match_limit
         )
-    client = resolution.client
+        if resolution.client is None:
+            return clarify_or_abstain_client(resolution)
+        client = resolution.client
 
     when: datetime | None = None
     if extracted.when:
@@ -78,19 +86,17 @@ async def propose_cancellation(
             if when.tzinfo is None:
                 when = when.replace(tzinfo=UTC)
         except ValueError:
-            when = None  # pista ilegible → se degrada a sin-pista (la fecha es opcional)
+            when = None
 
-    appt_res = await resolve_single_appointment(
-        practice_id, client, when, now=now, limit=settings.appt_name_match_limit
-    )
-    if appt_res.appointment is None:
-        return ProposalResult(
-            proposed_action=None,
-            abstained=True,
-            message=appt_res.abstain_message,
-            reason=appt_res.abstain_reason,
+    if appointment_override is not None:
+        appt = appointment_override
+    else:
+        appt_res = await resolve_single_appointment(
+            practice_id, client, when, now=now, limit=settings.appt_name_match_limit
         )
-    appt = appt_res.appointment
+        if appt_res.appointment is None:
+            return clarify_or_abstain_appointment(appt_res)
+        appt = appt_res.appointment
     start = appt["start_at"]
 
     params: dict[str, Any] = {
