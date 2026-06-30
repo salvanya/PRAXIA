@@ -6,6 +6,7 @@ from langgraph.types import Command
 
 from app.agents import write_tools
 from app.agents.action_agent import Clarification, ProposalResult
+from app.graph import nodes
 from app.graph.build import build_graph
 from app.graph.state import new_state
 
@@ -82,9 +83,15 @@ async def test_slotfill_client_then_appointment_then_confirm(monkeypatch) -> Non
     async def _choice(numbered, reply, *, n, gen_llm=None):
         return 1  # el usuario elige siempre la opción 1
 
-    # `nodes` importa estos nombres directamente → se parchean en app.graph.nodes
+    async def _route(message, llm=None):  # type: ignore[no-untyped-def]
+        # 1er turno → action (los siguientes van por entry→clarify, no por el router);
+        # determinístico, sin Ollama.
+        return "action"
+
+    # `nodes`/`router` importan estos nombres directamente → se parchean en su módulo
     monkeypatch.setattr("app.graph.nodes.classify_write_action", _clf)
     monkeypatch.setattr("app.graph.nodes.resolve_choice", _choice)
+    monkeypatch.setattr("app.graph.router.classify_intent", _route)
     monkeypatch.setitem(
         write_tools.REGISTRY,
         "cancel_appointment",
@@ -117,22 +124,20 @@ async def test_slotfill_client_then_appointment_then_confirm(monkeypatch) -> Non
 
 
 async def test_plain_message_while_paused_at_confirm_does_not_write(monkeypatch) -> None:
-    """Fix 2: un mensaje de texto plano en un thread pausado en confirm_action
-    NO debe disparar el write de la acción pendiente.
+    """Fix 2: un mensaje de texto plano en un thread pausado en confirm_action NO debe
+    disparar el write de la acción pendiente (garantía HITL con thread_id estable).
 
-    Se construye el escenario en dos pasos:
-    1. Se manda una petición que produce directamente un proposed_action (sin ambigüedad),
-       de modo que el graph queda suspendido en confirm_action (snap.next == ("confirm_action",)).
-    2. Se manda {"messages": [HumanMessage(...)]} plain — NOT Command(resume=...) — al mismo config.
-    3. Se verifica que write_spy["n"] == 0.
+    Comportamiento REAL de LangGraph (MemorySaver), verificado con un diagnóstico
+    determinístico: un input que NO es Command(resume=...) sobre un thread interrumpido
+    DESCARTA el interrupt pendiente y RE-EJECUTA el grafo desde el entry con el mensaje
+    nuevo encolado en messages. El mensaje nuevo se rutea como un turno normal (acá, con el
+    router forzado a out_of_scope, va a scope_reject → END); la acción pendiente NUNCA se
+    escribe (el write solo ocurre si interrupt() devuelve "confirm" vía Command). El
+    proposed_action queda huérfano en el estado pero inerte (confirm_action solo se alcanza
+    vía propose_action/clarify, que lo recomputan antes).
 
-    Lo que LangGraph hace con un non-Command input a un thread interrumpido:
-    LangGraph (MemorySaver) lo trata como un nuevo turno de usuario y lo
-    encola/merge en messages, luego reanuda la ejecución desde el inicio del grafo
-    (no desde el interrupt). El nodo confirm_action se vuelve a alcanzar y llama
-    interrupt() de nuevo, lo que suspende el grafo otra vez sin escribir. El write
-    solo ocurre si el valor devuelto por interrupt() == "confirm" (vía Command).
-    En consecuencia: el write_spy permanece en 0 y el grafo queda pausado de nuevo.
+    El router se mockea (sin Ollama) para que el test sea determinístico: 1er turno
+    "cancelá…" → action (llega a confirm); 2do turno "otra cosa" → out_of_scope.
     """
     action = {
         "kind": "cancel_appointment",
@@ -163,7 +168,12 @@ async def test_plain_message_while_paused_at_confirm_does_not_write(monkeypatch)
             "start_at": datetime(2026, 7, 1, 14, 0, tzinfo=UTC),
         }
 
+    async def _route(message, llm=None):  # type: ignore[no-untyped-def]
+        # Determinístico, sin Ollama: 1er turno "cancelá…" → action; 2do → out_of_scope.
+        return "action" if "cancel" in message.lower() else "out_of_scope"
+
     monkeypatch.setattr("app.graph.nodes.classify_write_action", _clf)
+    monkeypatch.setattr("app.graph.router.classify_intent", _route)
     monkeypatch.setitem(
         write_tools.REGISTRY,
         "cancel_appointment",
@@ -179,20 +189,26 @@ async def test_plain_message_while_paused_at_confirm_does_not_write(monkeypatch)
     graph = build_graph(checkpointer=MemorySaver())
     cfg = {"configurable": {"thread_id": "slotfill-plain-msg"}}
 
-    # Paso 1: llegar a confirm_action (interrupt activo).
+    # Paso 1: llegar a confirm_action (interrupt activo, resumable).
     await graph.ainvoke(new_state("cancelá el turno de Ana", "pid", "slotfill-plain-msg"), cfg)
     snap = await graph.aget_state(cfg)
     assert snap.next == (
         "confirm_action",
-    ), f"Expected interrupt at confirm_action, got {snap.next}"
+    ), f"Esperaba interrupt en confirm_action, got {snap.next}"
 
-    # Paso 2: enviar un mensaje plano (NO Command(resume=...)) al thread interrumpido.
-    # Observamos qué hace LangGraph: re-ejecuta desde el inicio con el mensaje extra
-    # y vuelve a interrumpirse en confirm_action sin llamar a write.
+    # Paso 2: mandar un mensaje plano (NO Command(resume=...)) al thread interrumpido.
     await graph.ainvoke({"messages": [HumanMessage(content="otra cosa")]}, cfg)
+    snap2 = await graph.aget_state(cfg)
 
-    # Paso 3: write NO fue llamado (el interrupt protege la escritura).
+    # El interrupt se descarta y el grafo re-ejecuta desde el entry: el mensaje nuevo se
+    # rutea (out_of_scope → scope_reject → END). No se re-interrumpe ni se escribe.
+    assert snap2.next == (), f"Esperaba END tras re-ejecutar el mensaje nuevo, got {snap2.next}"
     assert write_spy["n"] == 0, (
         f"write fue llamado {write_spy['n']} veces con input de texto plano — "
         "el interrupt no protegió la acción pendiente"
+    )
+    last = snap2.values["messages"][-1].content
+    assert last == nodes.SCOPE_MESSAGE, (
+        "el mensaje plano debió procesarse como turno nuevo (scope_reject), "
+        f"no quedar la acción vieja; last={last!r}"
     )
