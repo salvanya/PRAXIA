@@ -5,7 +5,7 @@ from typing import Any, Literal
 from pydantic import BaseModel
 
 from app import db
-from app.agents.resolvers import AppointmentResolution, ClientResolution
+from app.agents.resolvers import AppointmentResolution, ClientResolution, resolve_single_client
 from app.config import get_settings
 from app.llm import make_llm
 
@@ -117,35 +117,28 @@ def _summary(params: dict[str, Any], start: datetime, end: datetime) -> str:
 
 
 async def propose_appointment(
-    question: str, practice_id: str, *, now: datetime, gen_llm: Any = None
+    question: str,
+    practice_id: str,
+    *,
+    now: datetime,
+    gen_llm: Any = None,
+    client_override: dict[str, Any] | None = None,
+    appointment_override: dict[str, Any] | None = None,  # ignorado; uniformidad del dispatch
 ) -> ProposalResult:
     settings = get_settings()
     extracted = await _extract(question, now, gen_llm)
     if extracted is None:
         return _abstain(GENERIC_MESSAGE, "extract_failed")
 
-    if not extracted.client_name.strip():
-        return _abstain(
-            "No me dijiste para qué cliente es el turno. ¿Me pasás el nombre?",
-            "client_missing",
+    if client_override is not None:
+        client = client_override
+    else:
+        resolution = await resolve_single_client(
+            practice_id, extracted.client_name, limit=settings.appt_name_match_limit
         )
-
-    clients = await db.find_clients_by_name(
-        practice_id, extracted.client_name, limit=settings.appt_name_match_limit
-    )
-    if not clients:
-        return _abstain(
-            f"No encontré ningún cliente que coincida con «{extracted.client_name}». "
-            "¿Me das el nombre completo?",
-            "client_not_found",
-        )
-    if len(clients) > 1:
-        names = ", ".join(c["full_name"] for c in clients)
-        return _abstain(
-            f"Hay varios clientes que coinciden con «{extracted.client_name}»: {names}. ¿Cuál es?",
-            "client_ambiguous",
-        )
-    client = clients[0]
+        if resolution.client is None:
+            return clarify_or_abstain_client(resolution)
+        client = resolution.client
 
     if extracted.practitioner_name:
         pracs = await db.find_practitioners_by_name(

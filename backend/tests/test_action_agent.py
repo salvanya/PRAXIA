@@ -239,3 +239,51 @@ def test_clarify_or_abstain_appointment_ambiguous_sets_stage() -> None:
     )
     pr = clarify_or_abstain_appointment(res)
     assert pr.clarification is not None and pr.clarification.stage == "appointment"
+
+
+async def test_create_client_override_skips_resolution(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    called = {"clients": False}
+
+    async def _find_clients(*a, **k):  # type: ignore[no-untyped-def]
+        called["clients"] = True
+        return []
+
+    async def _list_pracs(practice_id):  # type: ignore[no-untyped-def]
+        return [{"id": "p1", "full_name": "Dra. Gómez"}]
+
+    monkeypatch.setattr(db, "find_clients_by_name", _find_clients)
+    monkeypatch.setattr(db, "list_active_practitioners", _list_pracs)
+    llm = FakeGenLLM(ProposedAppointment(client_name="Ana", start_at="2026-07-05T10:00:00"))
+    result = await action_agent.propose_appointment(
+        "agendá un turno para Ana el 5/7 10:00",
+        "pid",
+        now=NOW,
+        gen_llm=llm,
+        client_override={"id": "c1", "full_name": "Ana López"},
+    )
+    assert not called["clients"] and result.proposed_action is not None
+    assert result.proposed_action["params"]["client_id"] == "c1"
+
+
+async def test_create_client_ambiguous_clarification(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    async def _find_clients(practice_id, name, *, limit):  # type: ignore[no-untyped-def]
+        return [{"id": "1", "full_name": "Ana A"}, {"id": "2", "full_name": "Ana B"}]
+
+    monkeypatch.setattr(db, "find_clients_by_name", _find_clients)
+    llm = FakeGenLLM(ProposedAppointment(client_name="Ana", start_at="2026-07-05T10:00:00"))
+    result = await action_agent.propose_appointment(
+        "agendá un turno para Ana", "pid", now=NOW, gen_llm=llm
+    )
+    assert result.clarification is not None and result.clarification.stage == "client"
+
+
+async def test_create_client_not_found_still_abstains(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    async def _find_clients(practice_id, name, *, limit):  # type: ignore[no-untyped-def]
+        return []
+
+    monkeypatch.setattr(db, "find_clients_by_name", _find_clients)
+    llm = FakeGenLLM(ProposedAppointment(client_name="Zzz", start_at="2026-07-05T10:00:00"))
+    result = await action_agent.propose_appointment(
+        "agendá un turno para Zzz", "pid", now=NOW, gen_llm=llm
+    )
+    assert result.abstained and result.reason == "client_not_found" and result.clarification is None
