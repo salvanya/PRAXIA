@@ -180,9 +180,7 @@ async def test_classify_routes_reschedule_and_update_client() -> None:
         == "reschedule_appointment"
     )
     assert (
-        await classify_write_action(
-            "cambiá el teléfono de Ana", llm=FakeSeqLLM("update_client")
-        )
+        await classify_write_action("cambiá el teléfono de Ana", llm=FakeSeqLLM("update_client"))
         == "update_client"
     )
 
@@ -191,8 +189,15 @@ async def test_write_reschedule_adapter(monkeypatch) -> None:
     captured: dict = {}
 
     async def _fake(practice_id, appointment_id, new_start_at, new_end_at):  # type: ignore[no-untyped-def]
-        captured.update(appointment_id=appointment_id, new_start_at=new_start_at, new_end_at=new_end_at)
-        return {"id": appointment_id, "status": "programado", "start_at": new_start_at, "end_at": new_end_at}
+        captured.update(
+            appointment_id=appointment_id, new_start_at=new_start_at, new_end_at=new_end_at
+        )
+        return {
+            "id": appointment_id,
+            "status": "programado",
+            "start_at": new_start_at,
+            "end_at": new_end_at,
+        }
 
     monkeypatch.setattr(write_tools.db, "reschedule_appointment", _fake)
     params = {
@@ -214,7 +219,11 @@ async def test_write_reschedule_adapter_handles_none(monkeypatch) -> None:
     monkeypatch.setattr(write_tools.db, "reschedule_appointment", _fake)
     row = await write_tools._write_reschedule(
         "pid",
-        {"appointment_id": "a1", "new_start_at": "2026-07-03T15:00:00+00:00", "new_end_at": "2026-07-03T15:30:00+00:00"},
+        {
+            "appointment_id": "a1",
+            "new_start_at": "2026-07-03T15:00:00+00:00",
+            "new_end_at": "2026-07-03T15:30:00+00:00",
+        },
     )
     assert row == {"rescheduled": False}
 
@@ -236,10 +245,22 @@ async def test_write_update_client_adapter(monkeypatch) -> None:
 
     async def _fake(practice_id, client_id, *, phone, email, status, dob):  # type: ignore[no-untyped-def]
         captured.update(client_id=client_id, phone=phone, email=email, status=status, dob=dob)
-        return {"id": client_id, "full_name": "Ana López", "phone": phone, "email": email, "status": status, "dob": None}
+        return {
+            "id": client_id,
+            "full_name": "Ana López",
+            "phone": phone,
+            "email": email,
+            "status": status,
+            "dob": None,
+        }
 
     monkeypatch.setattr(write_tools.db, "update_client", _fake)
-    params = {"client_id": "c1", "client_name": "Ana López", "phone": "11-2233-4455", "status": "baja"}
+    params = {
+        "client_id": "c1",
+        "client_name": "Ana López",
+        "phone": "11-2233-4455",
+        "status": "baja",
+    }
     row = await write_tools._write_update_client("pid", params)
     assert row["updated"] is True
     assert captured["phone"] == "11-2233-4455" and captured["status"] == "baja"
@@ -258,7 +279,9 @@ async def test_write_update_client_adapter_handles_none(monkeypatch) -> None:
 
 def test_update_client_receipt_lists_changed_fields() -> None:
     params = {"client_id": "c1", "phone": "11-2233-4455", "status": "baja"}
-    ok = write_tools.format_update_client_receipt(params, {"updated": True, "full_name": "Ana López"})
+    ok = write_tools.format_update_client_receipt(
+        params, {"updated": True, "full_name": "Ana López"}
+    )
     assert "✅" in ok and "Ana López" in ok
     assert "teléfono" in ok and "11-2233-4455" in ok and "estado" in ok
     assert "email" not in ok  # no cambió → no se lista

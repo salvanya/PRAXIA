@@ -1,4 +1,5 @@
 import json
+import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Any, Literal
@@ -17,6 +18,8 @@ from app.graph.build import build_graph, get_default_graph
 from app.graph.state import new_state
 from app.ingest.pipeline import ingest_document
 from app.rag.synthesize import ollama_available
+
+logger = logging.getLogger(__name__)
 
 SUPPORTED_SUFFIXES = (".pdf", ".md", ".markdown", ".txt")
 
@@ -118,15 +121,24 @@ async def chat(req: ChatRequest, request: Request) -> EventSourceResponse:
             "Verificá que Ollama esté corriendo y volvé a intentar.",
         )
 
-    graph = getattr(request.app.state, "graph", None) or get_default_graph()
+    configured = getattr(request.app.state, "graph", None)
+    graph = configured or get_default_graph()
     s = get_settings()
     thread_id = req.thread_id or str(uuid4())
     config = {"configurable": {"thread_id": thread_id}}
     try:
         snapshot = await graph.aget_state(config)
         values = snapshot.values
-    except Exception:  # noqa: BLE001 - sin checkpointer (fallback get_default_graph) → arranca limpio
-        values = {}
+    except Exception as exc:  # noqa: BLE001
+        if configured is not None:
+            # Con checkpointer real, un fallo de lectura es transitorio: NO arrancar limpio
+            # (clobberaría una clarificación/propuesta en vuelo). 503 amable; el front reintenta.
+            logger.warning("aget_state falló para thread %s: %s", thread_id, exc)
+            raise HTTPException(
+                status_code=503,
+                detail="No pude leer el estado de la conversación. Reintentá en un momento.",
+            ) from exc
+        values = {}  # sin checkpointer (fallback de tests): arranca limpio
     inp = select_chat_input(values, req.message, s.practice_id, thread_id)
     return EventSourceResponse(_sse_event_stream(graph, inp, config))
 

@@ -72,7 +72,9 @@ async def rag_node(state: AgentState) -> dict:
 
 def _history_messages(state: AgentState, window: int) -> list[tuple[str, str]]:
     out: list[tuple[str, str]] = []
-    for m in state["messages"][-window:]:
+    # window=0 significa "sin historial" — [-0:] sería lista completa (bug silencioso).
+    tail = state["messages"][-window:] if window > 0 else []
+    for m in tail:
         text = getattr(m, "content", "")
         if not isinstance(text, str) or not text:
             continue

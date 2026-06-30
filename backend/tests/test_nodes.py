@@ -261,6 +261,41 @@ async def test_chitchat_includes_recent_history(monkeypatch):
     assert ("ai", "¡Hola Ana!") in captured["messages"]
 
 
+async def test_chitchat_window_zero_sends_no_history(monkeypatch):
+    """Fix 3: short_term_history_window=0 debe enviar SOLO el system message (sin historial).
+    Antes del fix, [-0:] == lista completa → se incluía todo el historial (bug silencioso)."""
+    captured = {}
+
+    class FakeMsg:
+        def __init__(self, content):
+            self.content = content
+
+    class FakeLLM:
+        async def astream(self, messages):
+            captured["messages"] = messages
+            yield FakeMsg("ok")
+
+    monkeypatch.setattr(nodes, "_chitchat_llm", lambda: FakeLLM())
+
+    # Forzar window=0 sin cambiar el env: parcheamos get_settings devolviendo un Settings
+    # con short_term_history_window=0.
+    from app.config import Settings
+
+    monkeypatch.setattr(nodes, "get_settings", lambda: Settings(short_term_history_window=0))
+
+    state = new_state("hola", "p", "t")
+    state["messages"] = [
+        HumanMessage(content="soy Ana"),
+        AIMessage(content="¡Hola Ana!"),
+        HumanMessage(content="hola"),
+    ]
+    await _run(nodes.chitchat_node, state)
+    # Solo debe llegar el system prompt, sin ningún turno de historial.
+    assert captured["messages"] == [
+        ("system", nodes.CHITCHAT_SYSTEM)
+    ], f"window=0 no debe incluir historial, pero se recibió: {captured['messages']}"
+
+
 async def test_propose_action_clarification_sets_pending(monkeypatch):
     from app.agents import write_tools
     from app.agents.action_agent import Clarification, ProposalResult
