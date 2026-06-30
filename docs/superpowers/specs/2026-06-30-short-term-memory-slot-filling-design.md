@@ -20,8 +20,12 @@ ambigüedad que hoy obliga a abstenerse. Son dos piezas acopladas: el slot-filli
    El front pasa a generar un `thread_id` estable por conversación y mandarlo en cada `/chat`; el backend lo
    respeta y **anexa** el turno al historial del checkpoint en vez de pisarlo.
 2. **Memoria conversacional.** Con el historial acumulado, `chitchat` ve los últimos turnos (charla
-   multi-turno: recuerda lo dicho antes). RAG/SQL/router **no** cambian (eso sería el follow-up contextual,
+   multi-turno: recuerda lo dicho antes). RAG/SQL **no** cambian (el follow-up contextual de RAG/SQL es
    fuera de alcance, ver No-objetivos).
+   > *Nota de implementación (Slice 8):* el `ROUTER_PROMPT` SÍ se extendió en 2 líneas — la descripción de
+   > `chitchat` ahora cubre meta-preguntas conversacionales ("¿qué te dije?", "¿lo recordás?") — porque sin
+   > eso esas preguntas ruteaban a `out_of_scope` y la memoria conversacional no funcionaba end-to-end. Cambio
+   > mínimo, sin regresión (`test_router.py` + gate no-llm verdes). El **mecanismo** del router no cambió.
 3. **Slot-filling de desambiguación.** Cuando una write-tool encuentra ambigüedad, el sistema **pregunta
    «¿cuál?» numerando los candidatos** y **resuelve en el turno siguiente** (en vez de abstenerse listando).
    Cubre los **dos** tipos de ambigüedad que hoy existen:
