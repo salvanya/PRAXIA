@@ -3,9 +3,10 @@ from typing import Any
 
 from langgraph.graph import END, START, StateGraph
 
-from app.graph.edges import route, route_after_propose
+from app.graph.edges import entry_route, route, route_after_propose
 from app.graph.nodes import (
     chitchat_node,
+    clarify_node,
     confirm_action_node,
     propose_action_node,
     rag_node,
@@ -27,8 +28,9 @@ def build_graph(checkpointer: Any = None) -> Any:
     g.add_node("sql_node", sql_node)
     g.add_node("propose_action", propose_action_node)
     g.add_node("confirm_action", confirm_action_node)
+    g.add_node("clarify", clarify_node)
 
-    g.add_edge(START, "router")
+    g.add_conditional_edges(START, entry_route, {"clarify": "clarify", "router": "router"})
     g.add_conditional_edges(
         "router",
         route,
@@ -44,6 +46,9 @@ def build_graph(checkpointer: Any = None) -> Any:
         "propose_action",
         route_after_propose,
         {"confirm_action": "confirm_action", END: END},
+    )
+    g.add_conditional_edges(
+        "clarify", route_after_propose, {"confirm_action": "confirm_action", END: END}
     )
     for node in _LEAF_NODES:
         g.add_edge(node, END)
