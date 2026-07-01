@@ -44,6 +44,9 @@ export function toContent(state: PartsState): ThreadAssistantContentPart[] {
       toolName: a.toolName,
       args: a.data,
       argsText: JSON.stringify(a.data),
+      // `result` = mismos datos: marca el tool-call como resuelto (no "requires-action")
+      // y da doble cobertura de render en a-ui (los Tool UI leen `args`). Hedge del §10.1.
+      result: a.data,
     } as unknown as ThreadAssistantContentPart);
   });
   return parts;
