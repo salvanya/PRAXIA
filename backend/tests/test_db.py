@@ -168,6 +168,28 @@ async def test_get_client_is_tenant_scoped() -> None:
 
 
 @pytest.mark.integration
+async def test_set_and_get_document_pii_summary() -> None:
+    from app.config import get_settings
+
+    pid = get_settings().practice_id
+    doc_id = await db.insert_document(
+        pid,
+        doc_type="protocolo",
+        title="PII round-trip",
+        file_uri="upload://x.md",
+        mime_type="text/markdown",
+        content_hash=None,
+    )
+    await db.set_document_status(
+        doc_id, "indexado", page_count=1, pii_summary={"PERSON": 3, "AR_DNI": 1}, practice_id=pid
+    )
+    doc = await db.get_document(pid, doc_id)
+    assert doc is not None
+    assert doc["pii_summary"] == {"PERSON": 3, "AR_DNI": 1}
+    assert doc["status"] == "indexado"
+
+
+@pytest.mark.integration
 async def test_update_client_partial_coalesce_and_guards() -> None:
     from seed_demo import seed_demo
 

@@ -57,6 +57,8 @@ CREATE TABLE IF NOT EXISTS documents (
 );
 -- Para bases ya creadas antes de agregar content_hash (idempotente).
 ALTER TABLE documents ADD COLUMN IF NOT EXISTS content_hash TEXT;
+-- Guardrails PII (Slice 9): resumen no-destructivo de PII por documento.
+ALTER TABLE documents ADD COLUMN IF NOT EXISTS pii_summary JSONB;
 CREATE INDEX IF NOT EXISTS idx_documents_client ON documents(client_id);
 CREATE INDEX IF NOT EXISTS idx_documents_type ON documents(practice_id, doc_type);
 -- Dedup de ingesta: un mismo contenido no se re-indexa dentro de la práctica.
