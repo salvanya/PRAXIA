@@ -108,6 +108,14 @@ test("confirm streams the receipt via resumeChat", async () => {
   await waitFor(() => expect(screen.getByText(/Turno creado/)).toBeTruthy());
 });
 
+test("cardFields falls back to summary for an unknown kind", () => {
+  const view = cardFields({ kind: "facturar", summary: "Facturar la sesión de Ana", params: {} });
+  expect(view.title).toBe("Confirmar acción");
+  expect(view.destructive).toBe(false);
+  expect(view.rows).toHaveLength(1);
+  expect(view.rows[0].value).toBe("Facturar la sesión de Ana");
+});
+
 test("cancel calls resumeChat with cancel", async () => {
   vi.spyOn(chatStream, "resumeChat").mockImplementation(() =>
     (async function* () {

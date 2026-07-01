@@ -522,3 +522,19 @@ async def test_sql_node_no_table_when_abstained(monkeypatch):
     monkeypatch.setattr(nodes, "answer_structured", _fake_answer)
     tables = await _run_tables(nodes.sql_node, new_state("algo raro", "p", "t"))
     assert tables == []
+
+
+async def test_sql_node_no_table_for_empty(monkeypatch):
+    from app.agents.sql_agent import SqlResult
+    from app.agents.sql_present import SQL_EMPTY_MESSAGE
+
+    async def _fake_answer(question, practice_id, **kw):
+        return SqlResult(sql="SELECT full_name FROM clients WHERE 1=0", rows=[], columns=[])
+
+    async def _fake_synth(question, rows, columns, llm=None):
+        return SQL_EMPTY_MESSAGE
+
+    monkeypatch.setattr(nodes, "answer_structured", _fake_answer)
+    monkeypatch.setattr(nodes, "synthesize_sql_answer", _fake_synth)
+    tables = await _run_tables(nodes.sql_node, new_state("algo vacío", "p", "t"))
+    assert tables == []

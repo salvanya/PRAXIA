@@ -39,6 +39,12 @@ test("toContent puts text first, then tool-call parts with stable ids", () => {
     toolCallId: "praxia-0",
     toolName: "praxia_sources",
   });
+  // Hedge §10.1: cada tool-call lleva args, argsText y result (mismos datos). No borrar de toContent.
+  const part = content[1] as { args: unknown; result: unknown; argsText: string };
+  const expectedData = { sources: [{ n: 1, title: "P", page: 2, document_id: "d1" }] };
+  expect(part.args).toEqual(expectedData);
+  expect(part.result).toEqual(expectedData);
+  expect(part.argsText).toBe(JSON.stringify(expectedData));
 });
 
 test("table events become a praxia_sql_table artifact", () => {
