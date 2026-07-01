@@ -53,14 +53,15 @@ def _warn_disabled() -> None:
 
 
 @lru_cache(maxsize=1)
-def _engines() -> tuple[Any, Any]:
+def _engines() -> tuple[Any, Any, Any]:
     """Init lazy y pesado. Los imports de presidio/spacy van AQUÍ DENTRO para que
     `import app.guardrails.pii` no falle sin la dependencia; solo falla `_engines()`.
-    Devuelve (AnalyzerEngine, AnonymizerEngine) o lanza PiiUnavailable."""
+    Devuelve (AnalyzerEngine, AnonymizerEngine, operators) o lanza PiiUnavailable."""
     try:
         from presidio_analyzer import AnalyzerEngine, Pattern, PatternRecognizer
         from presidio_analyzer.nlp_engine import NlpEngineProvider
         from presidio_anonymizer import AnonymizerEngine
+        from presidio_anonymizer.entities import OperatorConfig
     except Exception as exc:  # noqa: BLE001 - ImportError u otros → motor no disponible
         raise PiiUnavailable(f"presidio no disponible: {exc}") from exc
 
@@ -93,11 +94,16 @@ def _engines() -> tuple[Any, Any]:
         anonymizer = AnonymizerEngine()
     except Exception as exc:  # noqa: BLE001 - modelo spaCy ausente / config inválida
         raise PiiUnavailable(f"motor PII no inicializó: {exc}") from exc
-    return analyzer, anonymizer
+
+    operators = {
+        et: OperatorConfig("replace", {"new_value": ph}) for et, ph in PLACEHOLDERS.items()
+    }
+    operators["DEFAULT"] = OperatorConfig("replace", {"new_value": DEFAULT_PLACEHOLDER})
+    return analyzer, anonymizer, operators
 
 
 def analyze(text: str) -> list[Any]:
-    analyzer, _ = _engines()
+    analyzer = _engines()[0]
     s = get_settings()
     return list(
         analyzer.analyze(
@@ -123,13 +129,9 @@ def redact(text: str) -> tuple[str, dict[str, int]]:
     if not get_settings().pii_redaction_enabled:
         _warn_disabled()
         return text, {}
-    _, anonymizer = _engines()  # lanza PiiUnavailable si el motor está caído (fail-closed arriba)
+    _, anonymizer, operators = (
+        _engines()
+    )  # lanza PiiUnavailable si el motor está caído (fail-closed arriba)
     results = analyze(text)
-    from presidio_anonymizer.entities import OperatorConfig
-
-    operators = {
-        et: OperatorConfig("replace", {"new_value": ph}) for et, ph in PLACEHOLDERS.items()
-    }
-    operators["DEFAULT"] = OperatorConfig("replace", {"new_value": DEFAULT_PLACEHOLDER})
     out = anonymizer.anonymize(text=text, analyzer_results=results, operators=operators)
     return out.text, _counts(results)

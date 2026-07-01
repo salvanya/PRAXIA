@@ -58,3 +58,10 @@ def test_ar_cuit_regex_matches_cuit() -> None:
     cuit = re.compile(pii._CUIT_REGEX)
     assert cuit.search("CUIT 20-12345678-3")
     assert cuit.search("20123456783")
+
+
+def test_module_imports_without_presidio() -> None:
+    import importlib
+
+    mod = importlib.reload(importlib.import_module("app.guardrails.pii"))
+    assert hasattr(mod, "redact") and hasattr(mod, "summarize")
