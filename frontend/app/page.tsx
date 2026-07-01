@@ -6,6 +6,7 @@ import { useChatRuntime, type PendingAction } from "../lib/runtime";
 import { DropZone } from "../components/DropZone";
 import { DocumentList } from "../components/DocumentList";
 import { ConfirmCard } from "../components/ConfirmCard";
+import { SourcesToolUI } from "../components/toolUIs";
 
 export default function Home() {
   const [refreshKey, setRefreshKey] = useState(0);
@@ -24,7 +25,7 @@ export default function Home() {
         </aside>
         <section style={{ height: "100vh", display: "flex", flexDirection: "column" }}>
           <div style={{ flex: 1, minHeight: 0 }}>
-            <Thread />
+            <Thread tools={[SourcesToolUI]} />
           </div>
           {pending && (
             <ConfirmCard

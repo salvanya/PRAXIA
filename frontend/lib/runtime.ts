@@ -6,9 +6,10 @@ import {
   type ChatModelAdapter,
   type ChatModelRunOptions,
   type ChatModelRunResult,
+  type ThreadUserMessage,
 } from "@assistant-ui/react";
-import type { ThreadUserMessage } from "@assistant-ui/react";
-import { streamChat, type ProposedAction, type Source } from "./chatStream";
+import { streamChat, type ProposedAction } from "./chatStream";
+import { initialPartsState, reduceEvent, toContent, type PartsState } from "./messageParts";
 
 export interface PendingAction {
   threadId: string;
@@ -26,38 +27,31 @@ function lastUserText(messages: ChatModelRunOptions["messages"]): string {
   return "";
 }
 
-function sourcesBlock(sources: Source[]): string {
-  if (sources.length === 0) return "";
-  const lines = sources.map(
-    (s) => `[${s.n}] ${s.title}${s.page != null ? ` — p.${s.page}` : ""}`,
-  );
-  return `\n\n**Fuentes:**\n${lines.join("\n")}`;
-}
-
 export function useChatRuntime(onConfirm?: (p: PendingAction) => void) {
   const threadIdRef = useRef<string | undefined>(undefined);
   if (!threadIdRef.current) threadIdRef.current = crypto.randomUUID();
   const adapter = useMemo<ChatModelAdapter>(
     () => ({
-      async *run({ messages, abortSignal }: ChatModelRunOptions): AsyncGenerator<ChatModelRunResult, void> {
+      async *run({
+        messages,
+        abortSignal,
+      }: ChatModelRunOptions): AsyncGenerator<ChatModelRunResult, void> {
         const query = lastUserText(messages);
-        let answer = "";
-        let sources: Source[] = [];
-
+        let state: PartsState = initialPartsState;
         try {
           for await (const ev of streamChat(query, threadIdRef.current!, abortSignal)) {
-            if (ev.type === "token") {
-              answer += ev.text;
-              yield { content: [{ type: "text", text: answer }] };
-            } else if (ev.type === "sources") {
-              sources = ev.sources;
-            } else if (ev.type === "confirm") {
+            if (ev.type === "confirm") {
+              // Camino viejo hasta la Task 7 (el confirm pasa a tool-call inline allí).
               onConfirm?.({ threadId: ev.threadId, action: ev.action });
               yield {
-                content: [{ type: "text", text: "📝 Propuse una acción — revisá la tarjeta de confirmación." }],
+                content: [
+                  { type: "text", text: "📝 Propuse una acción — revisá la tarjeta de confirmación." },
+                ],
               };
               return;
             }
+            state = reduceEvent(state, ev);
+            yield { content: toContent(state) };
           }
         } catch (err) {
           if (abortSignal?.aborted) return;
@@ -65,8 +59,7 @@ export function useChatRuntime(onConfirm?: (p: PendingAction) => void) {
           yield { content: [{ type: "text", text: message }] };
           return;
         }
-
-        yield { content: [{ type: "text", text: answer + sourcesBlock(sources) }] };
+        yield { content: toContent(state), status: { type: "complete", reason: "stop" } };
       },
     }),
     [onConfirm],
