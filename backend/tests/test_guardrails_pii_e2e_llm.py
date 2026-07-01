@@ -9,7 +9,7 @@ from app.config import get_settings
 from app.graph.build import build_graph
 from app.graph.state import new_state
 
-pytestmark = [pytest.mark.llm, pytest.mark.pii]
+pytestmark = [pytest.mark.llm]
 
 
 async def _last_interaction_content(pid: str, client_id: str) -> str:
@@ -26,8 +26,8 @@ async def _last_interaction_content(pid: str, client_id: str) -> str:
     return row["content"] if row and row["content"] else ""
 
 
-async def test_log_interaction_persists_redacted_content() -> None:
-    """E2E: un mensaje con DNI crudo se persiste redactado en la tarjeta y en DB."""
+async def test_log_interaction_persists_raw_content() -> None:
+    """E2E (WYSIWYG): un mensaje con DNI se muestra y persiste CRUDO en la tarjeta y en DB."""
     from seed_demo import seed_demo
 
     await seed_demo()
@@ -63,11 +63,8 @@ async def test_log_interaction_persists_redacted_content() -> None:
     ), f"Se esperaba kind='log_interaction', se obtuvo: {action['kind']!r}"
     content_in_card = action["params"]["content"]
     assert (
-        "30.111.222" not in content_in_card
-    ), f"PII cruda presente en la tarjeta de confirmación: {content_in_card!r}"
-    assert (
-        "<DNI>" in content_in_card
-    ), f"Placeholder <DNI> ausente en la tarjeta de confirmación: {content_in_card!r}"
+        "30.111.222" in content_in_card
+    ), f"El DNI crudo debería estar visible en la tarjeta (WYSIWYG): {content_in_card!r}"
 
     await graph.ainvoke(Command(resume="confirm"), cfg)
 
@@ -75,5 +72,4 @@ async def test_log_interaction_persists_redacted_content() -> None:
     assert (
         stored
     ), f"No se encontró fila de interacción en DB para client_id={client['id']!r} tras confirmar."
-    assert "30.111.222" not in stored, f"PII cruda persistida en DB: {stored!r}"
-    assert "<DNI>" in stored, f"Placeholder <DNI> ausente en la fila persistida en DB: {stored!r}"
+    assert "30.111.222" in stored, f"El DNI crudo debería persistir en DB (WYSIWYG): {stored!r}"
