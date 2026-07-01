@@ -55,3 +55,27 @@ def test_render_rows_markdown_renders_null_as_empty() -> None:
     assert "None" not in md
     assert "| full_name | email |" in md
     assert "| Ana |  |" in md
+
+
+def test_deterministic_tabular_returns_sentence_not_markdown() -> None:
+    out = sql_present._deterministic([{"full_name": "Ana"}, {"full_name": "Beto"}], ["full_name"])
+    assert out == "Encontré 2 resultado(s)."
+    assert "|" not in out
+
+
+def test_deterministic_scalar_keeps_resultado_prefix() -> None:
+    out = sql_present._deterministic([{"total": 12}], ["total"])
+    assert out == "Resultado: 12"
+
+
+async def test_synth_falls_back_when_llm_emits_markdown_table() -> None:
+    # Aunque el prompt lo prohíbe, si el LLM devuelve una tabla markdown, se descarta
+    # (la tabla va como artefacto estructurado, no en la prosa).
+    out = await sql_present.synthesize_sql_answer(
+        "listá los clientes",
+        [{"full_name": "Ana"}, {"full_name": "Beto"}],
+        ["full_name"],
+        llm=FakeLLM("| full_name |\n| --- |\n| Ana |\n| Beto |"),
+    )
+    assert out == "Encontré 2 resultado(s)."
+    assert "|" not in out
