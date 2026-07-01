@@ -38,3 +38,32 @@ async def test_stream_translates_token_sources_confirm_done() -> None:
     assert payload["thread_id"] == "t1"
     assert payload["action"] == action
     assert events[-1] == {"event": "done", "data": "[DONE]"}
+
+
+async def test_stream_forwards_table_event_with_json_safe_serialization() -> None:
+    from datetime import UTC, datetime
+
+    graph = _FakeGraph(
+        [
+            (
+                "custom",
+                {
+                    "kind": "table",
+                    "columns": ["cliente", "fecha"],
+                    "rows": [{"cliente": "Ana", "fecha": datetime(2026, 7, 10, 10, 0, tzinfo=UTC)}],
+                    "sql": "SELECT cliente, fecha FROM turnos",
+                },
+            ),
+        ]
+    )
+    config = {"configurable": {"thread_id": "t1"}}
+    events = [e async for e in _sse_event_stream(graph, None, config)]
+
+    table = next(e for e in events if e["event"] == "table")
+    payload = json.loads(table["data"])
+    assert payload["columns"] == ["cliente", "fecha"]
+    assert payload["sql"] == "SELECT cliente, fecha FROM turnos"
+    # datetime → string vía default=str (no explota json.dumps)
+    assert payload["rows"][0]["cliente"] == "Ana"
+    assert isinstance(payload["rows"][0]["fecha"], str)
+    assert "2026-07-10" in payload["rows"][0]["fecha"]

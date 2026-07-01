@@ -464,3 +464,61 @@ async def test_clarify_chains_client_then_appointment(monkeypatch):
     pending = out["pending_clarification"]
     assert pending["stage"] == "appointment"
     assert pending["overrides"]["client"] == {"id": "1", "full_name": "Ana A"}
+
+
+async def _run_tables(node, state):
+    """Corre un nodo y devuelve la lista de chunks 'table' emitidos."""
+    graph = _one_node_graph(node)
+    tables = []
+    async for chunk in graph.astream(state, stream_mode="custom"):
+        if chunk["kind"] == "table":
+            tables.append(chunk)
+    return tables
+
+
+async def test_sql_node_emits_table_for_tabular_result(monkeypatch):
+    from app.agents.sql_agent import SqlResult
+
+    async def _fake_answer(question, practice_id, **kw):
+        return SqlResult(
+            sql="SELECT full_name FROM clients",
+            rows=[{"full_name": "Ana"}, {"full_name": "Beto"}],
+            columns=["full_name"],
+        )
+
+    async def _fake_synth(question, rows, columns, llm=None):
+        return "Encontré 2 resultado(s)."
+
+    monkeypatch.setattr(nodes, "answer_structured", _fake_answer)
+    monkeypatch.setattr(nodes, "synthesize_sql_answer", _fake_synth)
+    tables = await _run_tables(nodes.sql_node, new_state("listá clientes", "p", "t"))
+    assert len(tables) == 1
+    assert tables[0]["columns"] == ["full_name"]
+    assert tables[0]["rows"] == [{"full_name": "Ana"}, {"full_name": "Beto"}]
+    assert tables[0]["sql"] == "SELECT full_name FROM clients"
+
+
+async def test_sql_node_no_table_for_scalar(monkeypatch):
+    from app.agents.sql_agent import SqlResult
+
+    async def _fake_answer(question, practice_id, **kw):
+        return SqlResult(sql="SELECT count(*)", rows=[{"total": 12}], columns=["total"])
+
+    async def _fake_synth(question, rows, columns, llm=None):
+        return "Tenés 12 turnos."
+
+    monkeypatch.setattr(nodes, "answer_structured", _fake_answer)
+    monkeypatch.setattr(nodes, "synthesize_sql_answer", _fake_synth)
+    tables = await _run_tables(nodes.sql_node, new_state("¿cuántos turnos?", "p", "t"))
+    assert tables == []
+
+
+async def test_sql_node_no_table_when_abstained(monkeypatch):
+    from app.agents.sql_agent import SqlResult
+
+    async def _fake_answer(question, practice_id, **kw):
+        return SqlResult(sql=None, abstained=True, reason="x")
+
+    monkeypatch.setattr(nodes, "answer_structured", _fake_answer)
+    tables = await _run_tables(nodes.sql_node, new_state("algo raro", "p", "t"))
+    assert tables == []
