@@ -1,4 +1,3 @@
-import asyncio
 from datetime import datetime
 from typing import Any, Literal
 
@@ -7,16 +6,11 @@ from pydantic import BaseModel
 from app.agents.action_agent import ProposalResult, clarify_or_abstain_client
 from app.agents.resolvers import resolve_single_client
 from app.config import get_settings
-from app.guardrails import pii
 from app.llm import make_llm
 
 GENERIC_MESSAGE = (
     "No pude registrar la interacción con esos datos. ¿Probás de nuevo indicando "
     "el cliente y qué pasó?"
-)
-PII_UNAVAILABLE_MESSAGE = (
-    "No puedo registrar texto libre ahora mismo: el filtro de datos personales no está "
-    "disponible. Avisá al administrador."
 )
 
 
@@ -52,10 +46,12 @@ async def _extract(question: str, gen_llm: Any) -> ProposedInteraction | None:
     return result if isinstance(result, ProposedInteraction) else None
 
 
-def _card_summary(client_name: str, type_: str, summary: str) -> str:
-    snippet = summary.strip()
-    if len(snippet) > 80:
-        snippet = snippet[:79] + "…"
+def _card_summary(client_name: str, type_: str, content: str) -> str:
+    # WYSIWYG: la tarjeta muestra el CONTENT crudo (lo que se va a guardar) para que el
+    # humano verifique el dato real antes de confirmar, no un resumen parafraseado.
+    snippet = content.strip()
+    if len(snippet) > 120:
+        snippet = snippet[:119] + "…"
     return f"Registrar {type_} de {client_name} — «{snippet}»"
 
 
@@ -85,29 +81,22 @@ async def propose_interaction(
             return clarify_or_abstain_client(resolution)
         client = resolution.client
 
-    try:
-        red_summary, _ = await asyncio.to_thread(pii.redact, extracted.summary)
-        red_content, _ = await asyncio.to_thread(pii.redact, extracted.content)
-    except pii.PiiUnavailable:
-        return ProposalResult(
-            proposed_action=None,
-            abstained=True,
-            message=PII_UNAVAILABLE_MESSAGE,
-            reason="pii_unavailable",
-        )
-
+    # WYSIWYG (decisión del usuario, 2026-07-01): el content/summary de la interacción se
+    # muestran y se guardan CRUDOS — es el registro clínico del profesional, verificable y
+    # recuperable. La redacción destructiva se reserva para superficies no confiables/compartidas
+    # (audit log, exports, docs de terceros) = Fase 2. El tag no-destructivo de ingesta se mantiene.
     params: dict[str, Any] = {
         "client_id": client["id"],
         "client_name": client["full_name"],
         "type": extracted.type,
-        "summary": red_summary,
-        "content": red_content,
+        "summary": extracted.summary,
+        "content": extracted.content,
         "occurred_at": now.isoformat(),
         "source": "agente",
     }
     proposed_action = {
         "kind": "log_interaction",
-        "summary": _card_summary(client["full_name"], extracted.type, red_summary),
+        "summary": _card_summary(client["full_name"], extracted.type, extracted.content),
         "params": params,
     }
     return ProposalResult(proposed_action=proposed_action, abstained=False, message="", reason="ok")

@@ -10,6 +10,31 @@
 > `reschedule_appointment` + `update_client` (`2026-06-29-reschedule-and-update-client-design.md`),
 > memoria de corto plazo + slot-filling (`2026-06-30-short-term-memory-slot-filling-design.md`).
 
+## ⚠️ Addendum (2026-07-01) — reversión a WYSIWYG en escrituras (post-merge, feedback de usuario)
+
+Tras el smoke en navegador, el usuario decidió **revertir la redacción destructiva del camino de
+escritura** (`log_interaction`). La **Decisión de límites #3** (redactar en el proposer; tarjeta ==
+lo guardado, ambos redactados) queda **ANULADA**. Motivo: *no se puede confirmar a ciegas* — redactar
+las propias notas clínicas del profesional destruye su valor (la fricción que se anticipó en el
+brainstorming). Comportamiento final (rama `fase-1/interaction-raw-content`):
+
+- **`log_interaction`**: `summary`/`content` se **muestran y guardan CRUDOS** (WYSIWYG). La tarjeta
+  muestra el `content` (el dato real) para verificarlo antes de confirmar. `propose_interaction` ya
+  **no** llama a `pii.redact`.
+- **La redacción destructiva (`pii.redact`) se reserva para superficies no confiables/compartidas**
+  (audit log, exports, docs de terceros) = **Fase 2**. `pii.redact` queda en el módulo, **sin caller
+  en Fase 1** (validado por los engine tests). Privacidad at-rest → RLS + cifrado en reposo (Fase 4).
+- **Sin cambios:** el módulo `guardrails/pii.py`, el **tag no-destructivo de ingesta**
+  (`documents.pii_summary`), el ruteo de notas → `log_interaction`, config, schema, db, y
+  `update_client` (siempre mostró/guardó crudo).
+- Tests: se quitaron los 2 tests de redacción de `test_interaction_agent.py` (+ fixture identity); el
+  e2e `test_guardrails_pii_e2e_llm.py` pasó a asertar **CRUDO** (WYSIWYG) y perdió el marker `pii`.
+  Gate no-llm **264**; e2e `-m llm` verde.
+
+> El resto del spec describe el diseño **original** (redacción en escrituras). Leelo con este addendum
+> como la **fuente de verdad** del comportamiento final: en escrituras NO se redacta; la redacción es
+> solo tag no-destructivo en ingesta (Fase 1) y destructiva en superficies compartidas (Fase 2).
+
 ## Objetivo
 
 Cumplir la **directiva primaria §0** (datos de salud, privacidad por defecto) introduciendo la **primera capa de
