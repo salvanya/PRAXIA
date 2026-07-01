@@ -60,6 +60,16 @@ def test_ar_cuit_regex_matches_cuit() -> None:
     assert cuit.search("20123456783")
 
 
+def test_ar_phone_regex_matches_phone_not_dni() -> None:
+    phone = re.compile(pii._AR_PHONE_REGEX)
+    assert phone.search("llamá al 11-2233-4455")
+    assert phone.search("cel 351-123-4567")
+    # un DNI con puntos NO debe matchear como teléfono
+    assert not phone.search("12.345.678")
+    # un CUIT (2-8-1) NO debe matchear como teléfono
+    assert not phone.search("20-12345678-3")
+
+
 def test_module_imports_without_presidio() -> None:
     import importlib
 

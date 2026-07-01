@@ -12,6 +12,7 @@ PLACEHOLDERS: dict[str, str] = {
     "EMAIL_ADDRESS": "<EMAIL>",
     "AR_DNI": "<DNI>",
     "AR_CUIT": "<CUIT>",
+    "AR_PHONE": "<TELÉFONO>",
     "LOCATION": "<UBICACIÓN>",
     "CREDIT_CARD": "<TARJETA>",
     "IBAN_CODE": "<IBAN>",
@@ -29,12 +30,16 @@ _ENTITIES = [
     "IBAN_CODE",
     "AR_DNI",
     "AR_CUIT",
+    "AR_PHONE",
 ]
 
 # Reconocedores argentinos (Presidio no los trae). Regex de arranque; el test
 # de motor real (Task 3) es la verdad de tierra si hay que afinarlos.
 _DNI_REGEX = r"\b\d{1,2}\.?\d{3}\.?\d{3}\b"
 _CUIT_REGEX = r"\b\d{2}-?\d{8}-?\d\b"
+# AR phones: 2-4 área + dash + 3-4 + dash + 4 (p.ej. 11-2233-4455, 351-123-4567).
+# Intencionalmente usa guiones para no solapar con DNI (puntos) ni CUIT (2-8-1).
+_AR_PHONE_REGEX = r"\b\d{2,4}-\d{3,4}-\d{4}\b"
 
 _warned = False
 
@@ -89,6 +94,23 @@ def _engines() -> tuple[Any, Any, Any]:
                 supported_language="es",
                 patterns=[Pattern(name="ar_cuit", regex=_CUIT_REGEX, score=0.5)],
                 context=["cuit", "cuil"],
+            )
+        )
+        analyzer.registry.add_recognizer(
+            PatternRecognizer(
+                supported_entity="AR_PHONE",
+                supported_language="es",
+                patterns=[Pattern(name="ar_phone", regex=_AR_PHONE_REGEX, score=0.4)],
+                context=[
+                    "tel",
+                    "teléfono",
+                    "telefono",
+                    "celular",
+                    "cel",
+                    "llamar",
+                    "llamá",
+                    "llama",
+                ],
             )
         )
         anonymizer = AnonymizerEngine()

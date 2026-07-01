@@ -38,3 +38,10 @@ def test_redact_real_engine_passthrough_without_pii() -> None:
 def test_summarize_real_engine_counts() -> None:
     counts = pii.summarize("Juan Pérez y María González, tel 11-2233-4455")
     assert counts.get("PERSON", 0) >= 2
+
+
+@pytest.mark.pii
+def test_redact_real_engine_removes_ar_phone_and_cuit() -> None:
+    out, _ = pii.redact("Llamá al 11-2233-4455; el CUIT es 20-12345678-3.")
+    assert "11-2233-4455" not in out and "20-12345678-3" not in out
+    assert "<TELÉFONO>" in out and "<CUIT>" in out
