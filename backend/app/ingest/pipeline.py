@@ -1,10 +1,15 @@
+import asyncio
 import hashlib
+import logging
 
 from app import db, embeddings, vectorstore
 from app.config import get_settings
+from app.guardrails import pii
 from app.ingest.chunk import chunk
 from app.ingest.parse import parse
 from app.models import DocumentSummary
+
+logger = logging.getLogger(__name__)
 
 
 async def ingest_document(data: bytes, filename: str, doc_type: str, title: str) -> DocumentSummary:
@@ -41,13 +46,28 @@ async def ingest_document(data: bytes, filename: str, doc_type: str, title: str)
         await vectorstore.ensure_collection()
         await vectorstore.upsert_chunks(chunks, vectors, s.practice_id)
         page_count = len(parsed["pages"])
+        full_text = "\n".join(text for _, text in parsed["pages"])
+        pii_summary = await _safe_pii_summary(full_text)
         await db.set_document_status(
-            document_id, "indexado", page_count=page_count, practice_id=s.practice_id
+            document_id,
+            "indexado",
+            page_count=page_count,
+            pii_summary=pii_summary,
+            practice_id=s.practice_id,
         )
         return DocumentSummary(document_id=document_id, status="indexado", n_chunks=len(chunks))
     except Exception:
         await db.set_document_status(document_id, "error", practice_id=s.practice_id)
         raise
+
+
+async def _safe_pii_summary(text: str) -> dict[str, int] | None:
+    """Tag no-destructivo de PII. Fail-open: cualquier fallo → None (no bloquea la ingesta)."""
+    try:
+        return await asyncio.to_thread(pii.summarize, text)
+    except Exception:  # noqa: BLE001 - metadata no-crítica; nunca frena la ingesta
+        logger.warning("PII summarize falló; se omite el tag de PII", exc_info=True)
+        return None
 
 
 def _mime(filename: str) -> str:
