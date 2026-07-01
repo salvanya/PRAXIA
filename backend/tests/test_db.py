@@ -180,13 +180,21 @@ async def test_set_and_get_document_pii_summary() -> None:
         mime_type="text/markdown",
         content_hash=None,
     )
-    await db.set_document_status(
-        doc_id, "indexado", page_count=1, pii_summary={"PERSON": 3, "AR_DNI": 1}, practice_id=pid
-    )
-    doc = await db.get_document(pid, doc_id)
-    assert doc is not None
-    assert doc["pii_summary"] == {"PERSON": 3, "AR_DNI": 1}
-    assert doc["status"] == "indexado"
+    try:
+        await db.set_document_status(
+            doc_id,
+            "indexado",
+            page_count=1,
+            pii_summary={"PERSON": 3, "AR_DNI": 1},
+            practice_id=pid,
+        )
+        doc = await db.get_document(pid, doc_id)
+        assert doc is not None
+        assert doc["pii_summary"] == {"PERSON": 3, "AR_DNI": 1}
+        assert doc["status"] == "indexado"
+    finally:
+        pool = await db.get_pool()
+        await pool.execute("DELETE FROM documents WHERE id = $1", doc_id)
 
 
 @pytest.mark.integration

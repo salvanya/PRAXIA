@@ -199,3 +199,4 @@ async def test_fail_closed_when_pii_unavailable(monkeypatch) -> None:
     )
     assert result.abstained and result.reason == "pii_unavailable"
     assert result.proposed_action is None
+    assert result.message == interaction_agent.PII_UNAVAILABLE_MESSAGE
