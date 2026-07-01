@@ -287,3 +287,11 @@ def test_update_client_receipt_lists_changed_fields() -> None:
     assert "email" not in ok  # no cambió → no se lista
     bad = write_tools.format_update_client_receipt(params, {"updated": False})
     assert "⚠️" in bad
+
+
+def test_classify_prompt_moves_nota_to_log_interaction() -> None:
+    lines = write_tools.CLASSIFY_PROMPT.splitlines()
+    log_line = next(line for line in lines if line.strip().startswith("- log_interaction"))
+    unsup_line = next(line for line in lines if line.strip().startswith("- unsupported"))
+    assert "nota" in log_line.lower()
+    assert "nota" not in unsup_line.lower()

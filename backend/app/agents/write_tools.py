@@ -193,9 +193,9 @@ CLASSIFY_PROMPT = (
     "El usuario pidió ejecutar UNA acción que modifica datos. Clasificá QUÉ acción es:\n"
     "- create_appointment: agendar/crear un turno NUEVO. "
     'Ej: "agendá un turno para Ana mañana 10".\n'
-    "- log_interaction: registrar/anotar una interacción YA OCURRIDA con un cliente "
-    "(sesión, llamada, email, nota, mensaje). "
-    'Ej: "registrá que llamé a Ana".\n'
+    "- log_interaction: registrar/anotar una interacción YA OCURRIDA con un cliente, o agregar "
+    "una NOTA o texto libre sobre un cliente (sesión, llamada, email, nota, mensaje). "
+    'Ej: "registrá que llamé a Ana", "agregá una nota sobre Juan".\n'
     "- cancel_appointment: cancelar/anular un turno EXISTENTE. "
     'Ej: "cancelá el turno de Juan".\n'
     "- reschedule_appointment: REPROGRAMAR/MOVER/cambiar la fecha u hora de un turno EXISTENTE "
@@ -205,9 +205,8 @@ CLASSIFY_PROMPT = (
     "- update_client: editar DATOS del CLIENTE (teléfono, email, estado activo/inactivo/baja, "
     "fecha de nacimiento). "
     'Ej: "cambiá el teléfono de Ana", "actualizá el email de Juan", "dá de baja a Pedro".\n'
-    "- unsupported: cualquier OTRA acción de escritura (facturar; agregar/editar una NOTA o texto "
-    "libre de un cliente; borrar registros). "
-    'Ej: "agregá una nota sobre Juan", "facturá la sesión de Ana".\n'
+    "- unsupported: cualquier OTRA acción de escritura (facturar; borrar registros). "
+    'Ej: "facturá la sesión de Ana", "borrá el registro de Juan".\n'
     "Respondé solo con la opción."
 )
 
