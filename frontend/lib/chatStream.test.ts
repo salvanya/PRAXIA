@@ -138,3 +138,18 @@ test("resumeChat posts thread_id and decision to /api/chat/resume", async () => 
   }));
   expect(events).toEqual([{ type: "token", text: "✅" }, { type: "done" }]);
 });
+
+test("streamChat parses a table event into a structured payload", async () => {
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValue(sseResponse([
+    'event: table\ndata: {"columns":["cliente"],"rows":[{"cliente":"Ana"}],"sql":"SELECT cliente FROM t"}\n\n',
+    "event: done\ndata: [DONE]\n\n",
+  ])));
+
+  const events = [];
+  for await (const ev of streamChat("listá", "t1")) events.push(ev);
+
+  expect(events).toEqual([
+    { type: "table", table: { columns: ["cliente"], rows: [{ cliente: "Ana" }], sql: "SELECT cliente FROM t" } },
+    { type: "done" },
+  ]);
+});
