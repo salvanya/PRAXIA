@@ -41,6 +41,14 @@ test("toContent puts text first, then tool-call parts with stable ids", () => {
   });
 });
 
+test("table events become a praxia_sql_table artifact", () => {
+  const table = { columns: ["c"], rows: [{ c: "x" }], sql: "SELECT c FROM t" };
+  const s = reduceEvent(initialPartsState, { type: "table", table });
+  expect(s.artifacts).toEqual([
+    { toolName: "praxia_sql_table", data: { columns: ["c"], rows: [{ c: "x" }], sql: "SELECT c FROM t" } },
+  ]);
+});
+
 test("toContent omits the text part when there is no text", () => {
   const s = reduceEvent(initialPartsState, {
     type: "sources",

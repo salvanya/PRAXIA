@@ -26,8 +26,23 @@ export function reduceEvent(state: PartsState, event: ChatEvent): PartsState {
           { toolName: "praxia_sources", data: { sources: event.sources } },
         ],
       };
+    case "table":
+      return {
+        ...state,
+        artifacts: [
+          ...state.artifacts,
+          {
+            toolName: "praxia_sql_table",
+            data: {
+              columns: event.table.columns,
+              rows: event.table.rows,
+              sql: event.table.sql,
+            },
+          },
+        ],
+      };
     default:
-      // table/confirm se agregan en tasks posteriores; done/desconocidos se ignoran
+      // confirm se agrega en task 7; done/desconocidos se ignoran
       // (sin regresión: un evento sin caso deja el estado igual).
       return state;
   }

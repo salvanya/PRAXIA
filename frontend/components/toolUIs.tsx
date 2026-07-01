@@ -3,8 +3,17 @@
 import { makeAssistantToolUI } from "@assistant-ui/react";
 import type { Source } from "../lib/chatStream";
 import { Citations } from "./Citations";
+import { SqlTable } from "./SqlTable";
 
 export const SourcesToolUI = makeAssistantToolUI<{ sources: Source[] }, unknown>({
   toolName: "praxia_sources",
   render: ({ args }) => <Citations sources={args.sources} />,
+});
+
+export const SqlTableToolUI = makeAssistantToolUI<
+  { columns: string[]; rows: Record<string, unknown>[]; sql?: string },
+  unknown
+>({
+  toolName: "praxia_sql_table",
+  render: ({ args }) => <SqlTable columns={args.columns} rows={args.rows} sql={args.sql} />,
 });
