@@ -19,3 +19,5 @@ mypy==1.13.*
 sqlglot==25.*
 PyYAML==6.*
 Faker==30.*
+presidio-analyzer==2.*
+presidio-anonymizer==2.*

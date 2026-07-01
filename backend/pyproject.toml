@@ -15,4 +15,5 @@ asyncio_mode = "auto"
 markers = [
     "integration: requires running Postgres/Qdrant (deselect with -m 'not integration')",
     "llm: requires a running Ollama with the configured model",
+    "pii: requires the spaCy model es_core_news_md + presidio (deselect with -m 'not pii')",
 ]
