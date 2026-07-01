@@ -28,3 +28,17 @@ def test_settings_have_sql_defaults() -> None:
 def test_short_term_history_window_default() -> None:
     get_settings.cache_clear()
     assert get_settings().short_term_history_window == 10
+
+
+def test_pii_settings_defaults() -> None:
+    get_settings.cache_clear()
+    s = get_settings()
+    assert s.pii_redaction_enabled is True
+    assert s.pii_spacy_model == "es_core_news_md"
+    assert s.pii_score_threshold == 0.5
+
+
+def test_pii_redaction_enabled_reads_env(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    monkeypatch.setenv("PII_REDACTION_ENABLED", "false")
+    get_settings.cache_clear()
+    assert get_settings().pii_redaction_enabled is False
