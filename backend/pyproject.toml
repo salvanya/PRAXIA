@@ -17,3 +17,10 @@ markers = [
     "llm: requires a running Ollama with the configured model",
     "pii: requires the spaCy model es_core_news_md + presidio (deselect with -m 'not pii')",
 ]
+filterwarnings = [
+    # langchain_core._api.deprecation emits a LangChainPendingDeprecationWarning
+    # when langgraph.checkpoint.serde.jsonplus imports JsonPlusSerializer (allowed_objects
+    # default change). Third-party; outside our control. Uses full class path so the
+    # filter is applied before surface_langchain_deprecation_warnings() overrides it.
+    "ignore:The default value of .allowed_objects. will change:langchain_core._api.deprecation.LangChainPendingDeprecationWarning",
+]
