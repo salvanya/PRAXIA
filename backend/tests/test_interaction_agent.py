@@ -1,8 +1,11 @@
 from datetime import UTC, datetime
 
+import pytest
+
 from app import db
 from app.agents import interaction_agent
 from app.agents.interaction_agent import ProposedInteraction
+from app.guardrails import pii
 
 NOW = datetime(2026, 6, 28, 14, 30, tzinfo=UTC)
 
@@ -142,3 +145,57 @@ async def test_interaction_client_ambiguous_clarification(monkeypatch) -> None:
     )
     assert result.clarification is not None and result.clarification.stage == "client"
     assert result.clarification.candidates[0]["id"] == "1"
+
+
+# ---------------------------------------------------------------------------
+# Autouse fixture: por defecto la redacción es identidad, para que los tests
+# existentes (que asertan summary/content crudos) sigan verdes.
+# Los tests de redacción la sobreescriben con su propio monkeypatch.
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture(autouse=True)
+def _identity_redact(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    monkeypatch.setattr(interaction_agent.pii, "redact", lambda t: (t, {}))
+
+
+async def test_redacts_summary_and_content(monkeypatch) -> None:
+    _patch_clients(monkeypatch, [{"id": "c1", "full_name": "Ana López"}])
+
+    def _fake_redact(text: str) -> tuple[str, dict]:
+        red = text.replace("Ana", "<NOMBRE>").replace("12.345.678", "<DNI>")
+        return red, {}
+
+    monkeypatch.setattr(interaction_agent.pii, "redact", _fake_redact)
+    llm = FakeGenLLM(
+        ProposedInteraction(
+            client_name="Ana",
+            type="nota",
+            summary="Nota sobre Ana",
+            content="Ana pasó el DNI 12.345.678",
+        )
+    )
+    result = await interaction_agent.propose_interaction(
+        "agregá una nota sobre Ana", "pid", now=NOW, gen_llm=llm
+    )
+    pa = result.proposed_action
+    assert pa is not None
+    assert pa["params"]["content"] == "<NOMBRE> pasó el DNI <DNI>"
+    assert pa["params"]["summary"] == "Nota sobre <NOMBRE>"
+    assert pa["params"]["client_name"] == "Ana López"  # intacto (del resolver)
+    assert "<NOMBRE>" in pa["summary"]  # la tarjeta muestra el resumen redactado
+
+
+async def test_fail_closed_when_pii_unavailable(monkeypatch) -> None:
+    _patch_clients(monkeypatch, [{"id": "c1", "full_name": "Ana López"}])
+
+    def _boom(text: str) -> tuple[str, dict]:
+        raise pii.PiiUnavailable("no model")
+
+    monkeypatch.setattr(interaction_agent.pii, "redact", _boom)
+    llm = FakeGenLLM(ProposedInteraction(client_name="Ana", summary="s", content="c"))
+    result = await interaction_agent.propose_interaction(
+        "registrá algo de Ana", "pid", now=NOW, gen_llm=llm
+    )
+    assert result.abstained and result.reason == "pii_unavailable"
+    assert result.proposed_action is None
