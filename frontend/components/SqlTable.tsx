@@ -17,7 +17,9 @@ export function SqlTable({
 }) {
   const [showSql, setShowSql] = useState(false);
   if (!rows.length) return <p className="my-2 text-sm text-gray-500">Sin resultados.</p>;
-  const cols = columns.length ? columns : Object.keys(rows[0]);
+  // El backend siempre provee `columns` en orden (run_select → list(rows[0].keys())).
+  // No usamos un fallback a Object.keys: enmascararía un orden distinto en silencio.
+  const cols = columns;
   return (
     <div className="my-2">
       <div className="max-h-80 overflow-auto rounded-md border border-gray-200">

@@ -12,8 +12,9 @@ test("renders columns in order and cell values", () => {
       ]}
     />,
   );
-  expect(screen.getByText("cliente")).toBeTruthy();
-  expect(screen.getByText("fecha")).toBeTruthy();
+  // orden de columnas, no sólo presencia
+  const headers = screen.getAllByRole("columnheader").map((h) => h.textContent);
+  expect(headers).toEqual(["cliente", "fecha"]);
   expect(screen.getByText("Ana")).toBeTruthy();
   expect(screen.getByText("Beto")).toBeTruthy();
 });
