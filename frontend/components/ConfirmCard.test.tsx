@@ -69,6 +69,21 @@ test("cardFields for update_client lists changed fields with labels", () => {
   expect(view.rows.find((r) => r.label === "Teléfono")?.value).toBe("099-123");
 });
 
+test("cardFields for log_interaction shows Cliente, Tipo, Contenido", () => {
+  const view = cardFields({
+    kind: "log_interaction",
+    summary: "x",
+    params: { client_name: "Ana", type: "llamada", content: "confirmó el turno" },
+  });
+  expect(view.title).toBe("Registrar interacción");
+  const labels = view.rows.map((r) => r.label);
+  expect(labels).toContain("Cliente");
+  expect(labels).toContain("Tipo");
+  expect(labels).toContain("Contenido");
+  expect(view.rows.find((r) => r.label === "Contenido")?.value).toBe("confirmó el turno");
+  expect(view.destructive).toBe(false);
+});
+
 test("confirm streams the receipt via resumeChat", async () => {
   vi.spyOn(chatStream, "resumeChat").mockImplementation(() =>
     (async function* () {
