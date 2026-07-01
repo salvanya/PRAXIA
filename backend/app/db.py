@@ -1,4 +1,5 @@
 import asyncio
+import json
 from datetime import date, datetime
 from typing import Any
 
@@ -59,18 +60,47 @@ async def find_document_by_hash(practice_id: str, content_hash: str) -> dict[str
 
 
 async def set_document_status(
-    document_id: str, status: str, page_count: int | None = None, *, practice_id: str
+    document_id: str,
+    status: str,
+    page_count: int | None = None,
+    *,
+    pii_summary: dict[str, int] | None = None,
+    practice_id: str,
 ) -> None:
     pool = await get_pool()
     result = await pool.execute(
-        "UPDATE documents SET status = $2, page_count = $3 WHERE id = $1 AND practice_id = $4",
+        """
+        UPDATE documents
+        SET status = $2, page_count = $3, pii_summary = COALESCE($5::jsonb, pii_summary)
+        WHERE id = $1 AND practice_id = $4
+        """,
         document_id,
         status,
         page_count,
         practice_id,
+        json.dumps(pii_summary) if pii_summary is not None else None,
     )
     if result == "UPDATE 0":
         raise RuntimeError(f"set_document_status: no se actualizó el documento {document_id}")
+
+
+async def get_document(practice_id: str, document_id: str) -> dict[str, Any] | None:
+    """Fila del documento (con pii_summary deserializado), o None. Scoped por práctica."""
+    pool = await get_pool()
+    row = await pool.fetchrow(
+        """
+        SELECT id::text, title, doc_type, status, page_count, pii_summary, ingested_at
+        FROM documents WHERE id = $1 AND practice_id = $2
+        """,
+        document_id,
+        practice_id,
+    )
+    if row is None:
+        return None
+    doc = dict(row)
+    raw = doc.get("pii_summary")
+    doc["pii_summary"] = json.loads(raw) if raw else None
+    return doc
 
 
 async def list_documents(practice_id: str) -> list[dict[str, Any]]:

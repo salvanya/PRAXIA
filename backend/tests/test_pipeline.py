@@ -4,6 +4,7 @@ from pathlib import Path
 import pytest
 
 from app import db, vectorstore
+from app.ingest import pipeline
 from app.ingest.pipeline import _mime, ingest_document
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -82,3 +83,27 @@ async def test_reingest_after_error_does_not_violate_hash_unique():
     # no insertar una nueva (que violaría el índice único content_hash).
     with pytest.raises(ValueError):
         await ingest_document(bad, "vacio.md", "protocolo", "Vacío")
+
+
+async def test_safe_pii_summary_returns_counts(monkeypatch) -> None:
+    monkeypatch.setattr(pipeline.pii, "summarize", lambda text: {"PERSON": 2})
+    assert await pipeline._safe_pii_summary("Ana y Beto") == {"PERSON": 2}
+
+
+async def test_safe_pii_summary_fail_open(monkeypatch) -> None:
+    def _boom(text: str) -> dict:
+        raise pipeline.pii.PiiUnavailable("no model")
+
+    monkeypatch.setattr(pipeline.pii, "summarize", _boom)
+    assert await pipeline._safe_pii_summary("Ana") is None  # fail-open, no relanza
+
+
+@pytest.mark.integration
+async def test_ingest_persists_pii_summary(monkeypatch) -> None:
+    await vectorstore.ensure_collection()
+    monkeypatch.setattr(pipeline.pii, "summarize", lambda text: {"PERSON": 2, "AR_DNI": 1})
+    data = b"# Doc PII\nJuan Perez, DNI 12.345.678.\n"
+    summary = await ingest_document(data, "pii_doc.md", "protocolo", "Doc PII")
+    doc = await db.get_document(os.environ["PRACTICE_ID"], summary["document_id"])
+    assert doc is not None
+    assert doc["pii_summary"] == {"PERSON": 2, "AR_DNI": 1}

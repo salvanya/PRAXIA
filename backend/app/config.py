@@ -31,6 +31,9 @@ class Settings(BaseSettings):
     short_term_history_window: int = (
         10  # mensajes recientes que ve chitchat (ventana fija; running_summary = Fase 2)
     )
+    pii_redaction_enabled: bool = True
+    pii_spacy_model: str = "es_core_news_md"
+    pii_score_threshold: float = 0.5
 
     # Constants (not from env)
     qdrant_collection: ClassVar[str] = "praxia_chunks"

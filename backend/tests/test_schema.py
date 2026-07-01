@@ -36,3 +36,13 @@ async def test_interactions_table_has_expected_columns() -> None:
         "occurred_at",
         "source",
     } <= cols
+
+
+@pytest.mark.integration
+async def test_documents_table_has_pii_summary() -> None:
+    pool = await db.get_pool()
+    rows = await pool.fetch(
+        "SELECT column_name FROM information_schema.columns WHERE table_name = 'documents'"
+    )
+    cols = {r["column_name"] for r in rows}
+    assert "pii_summary" in cols
