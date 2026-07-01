@@ -8,13 +8,8 @@ import {
   type ChatModelRunResult,
   type ThreadUserMessage,
 } from "@assistant-ui/react";
-import { streamChat, type ProposedAction } from "./chatStream";
+import { streamChat } from "./chatStream";
 import { initialPartsState, reduceEvent, toContent, type PartsState } from "./messageParts";
-
-export interface PendingAction {
-  threadId: string;
-  action: ProposedAction;
-}
 
 function lastUserText(messages: ChatModelRunOptions["messages"]): string {
   for (let i = messages.length - 1; i >= 0; i--) {
@@ -27,7 +22,7 @@ function lastUserText(messages: ChatModelRunOptions["messages"]): string {
   return "";
 }
 
-export function useChatRuntime(onConfirm?: (p: PendingAction) => void) {
+export function useChatRuntime() {
   const threadIdRef = useRef<string | undefined>(undefined);
   if (!threadIdRef.current) threadIdRef.current = crypto.randomUUID();
   const adapter = useMemo<ChatModelAdapter>(
@@ -40,16 +35,6 @@ export function useChatRuntime(onConfirm?: (p: PendingAction) => void) {
         let state: PartsState = initialPartsState;
         try {
           for await (const ev of streamChat(query, threadIdRef.current!, abortSignal)) {
-            if (ev.type === "confirm") {
-              // Camino viejo hasta la Task 7 (el confirm pasa a tool-call inline allí).
-              onConfirm?.({ threadId: ev.threadId, action: ev.action });
-              yield {
-                content: [
-                  { type: "text", text: "📝 Propuse una acción — revisá la tarjeta de confirmación." },
-                ],
-              };
-              return;
-            }
             state = reduceEvent(state, ev);
             yield { content: toContent(state) };
           }
@@ -62,7 +47,7 @@ export function useChatRuntime(onConfirm?: (p: PendingAction) => void) {
         yield { content: toContent(state), status: { type: "complete", reason: "stop" } };
       },
     }),
-    [onConfirm],
+    [],
   );
   return useLocalRuntime(adapter);
 }

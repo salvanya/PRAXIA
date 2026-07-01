@@ -41,8 +41,16 @@ export function reduceEvent(state: PartsState, event: ChatEvent): PartsState {
           },
         ],
       };
+    case "confirm":
+      return {
+        ...state,
+        artifacts: [
+          ...state.artifacts,
+          { toolName: "praxia_confirm", data: { threadId: event.threadId, action: event.action } },
+        ],
+      };
     default:
-      // confirm se agrega en task 7; done/desconocidos se ignoran
+      // done/desconocidos se ignoran
       // (sin regresión: un evento sin caso deja el estado igual).
       return state;
   }

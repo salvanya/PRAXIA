@@ -58,3 +58,11 @@ test("toContent omits the text part when there is no text", () => {
   expect(content).toHaveLength(1);
   expect(content[0]).toMatchObject({ type: "tool-call", toolCallId: "praxia-0" });
 });
+
+test("confirm events become a praxia_confirm artifact", () => {
+  const action = { kind: "cancel_appointment", summary: "x", params: { client_name: "Ana" } };
+  const s = reduceEvent(initialPartsState, { type: "confirm", threadId: "t1", action });
+  expect(s.artifacts).toEqual([
+    { toolName: "praxia_confirm", data: { threadId: "t1", action } },
+  ]);
+});
