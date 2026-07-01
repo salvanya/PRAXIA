@@ -13,16 +13,28 @@ export default function Home() {
 
   return (
     <AssistantRuntimeProvider runtime={runtime}>
-      <main style={{ display: "grid", gridTemplateColumns: "320px 1fr", height: "100vh" }}>
-        <aside style={{ padding: 16, borderRight: "1px solid #ddd", overflowY: "auto" }}>
-          <h1 style={{ fontSize: 18 }}>Praxia</h1>
+      <main className="grid h-screen grid-cols-[320px_1fr]">
+        <aside className="overflow-y-auto border-r border-gray-200 p-4">
+          <h1 className="text-lg font-semibold">Praxia</h1>
           <DropZone onIngested={() => setRefreshKey((k) => k + 1)} />
-          <h2 style={{ fontSize: 14, marginTop: 16 }}>Documentos</h2>
+          <h2 className="mt-4 text-sm font-medium text-gray-700">Documentos</h2>
           <DocumentList refreshKey={refreshKey} />
         </aside>
-        <section style={{ height: "100vh", display: "flex", flexDirection: "column" }}>
-          <div style={{ flex: 1, minHeight: 0 }}>
-            <Thread tools={[SourcesToolUI, SqlTableToolUI, ConfirmToolUI]} />
+        <section className="flex h-screen min-h-0 flex-col">
+          <div className="min-h-0 flex-1">
+            <Thread
+              tools={[SourcesToolUI, SqlTableToolUI, ConfirmToolUI]}
+              welcome={{
+                message:
+                  "Hola 👋 Preguntame por tu agenda o tus documentos, o pedime agendar, reprogramar, cancelar, registrar o actualizar datos.",
+              }}
+              strings={{
+                composer: {
+                  input: { placeholder: "Escribí tu mensaje…" },
+                  send: { tooltip: "Enviar" },
+                },
+              }}
+            />
           </div>
         </section>
       </main>
