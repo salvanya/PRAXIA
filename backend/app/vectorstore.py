@@ -40,7 +40,10 @@ async def upsert_chunks(chunks: list[Chunk], vectors: list[list[float]], practic
 
 async def count_chunks(document_id: str, practice_id: str) -> int:
     s = get_settings()
-    result = await _get_client().count(
+    client = _get_client()
+    if not await client.collection_exists(s.qdrant_collection):
+        return 0
+    result = await client.count(
         collection_name=s.qdrant_collection,
         count_filter=models.Filter(
             must=[
