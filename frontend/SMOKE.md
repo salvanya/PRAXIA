@@ -21,3 +21,34 @@ Sin Ollama: los pasos de ingesta y el streaming SSE igual funcionan; el chat dev
   - **Cancelar** → `Cancelado, no creé el turno.` y la tabla `appointments` no crece.
   - Si omitís el profesional (ej. `agendá un turno para <cliente> mañana a las 10`) el asistente **no abre tarjeta** y responde cordialmente preguntando `¿Con qué profesional? Tenés: …` — comportamiento correcto, no un error.
   - Pedido irresoluble (`agendá un turno para Zzz`) → abstención cordial, SIN tarjeta.
+
+---
+
+## Canvas rico (Slice canvas más rico — cierre Fase 1)
+
+Requiere seed demo (`backend/.venv/Scripts/python backend/seed_demo.py`) + Ollama. Todos los artefactos se
+renderizan **inline** en el flujo del chat vía content-parts `tool-call` de assistant-ui.
+
+1. **Citas RAG (Citations).** Preguntá algo documental: `¿cuánto dura la primera consulta?`
+   Esperado: respuesta en streaming **seguida de un bloque "Fuentes"** con footnotes numeradas
+   `[1] Título — p.N` (componente estilado, **no** el markdown crudo `**Fuentes:**` con asteriscos).
+
+2. **Tabla SQL (SqlTable).** Consulta que devuelva varias filas: `¿qué clientes tengo?` o
+   `listame los turnos de esta semana`.
+   Esperado: una frase breve **+ una tabla estilada** (header sticky, filas alternadas, scroll) y un
+   toggle **"ver consulta"** que muestra el `SELECT`. Una consulta **escalar** (`¿cuántos turnos esta
+   semana?`) muestra **solo la frase**, sin tabla.
+
+3. **ConfirmCard por-kind (HITL).** Pedí una escritura (ver arriba: `agendá un turno para …`).
+   Esperado: **tarjeta rica** con título por acción ("Agendar turno") y **campos legibles**
+   (Cliente / Profesional / Cuándo …) — **sin IDs internos**. **Confirmar** → recibo; **Cancelar** →
+   la acción no ocurre. La cancelación de turno (`cancelá el turno de …`) usa **tarjeta roja
+   (destructiva)**. La confirmación **sigue siendo obligatoria** (HITL airtight).
+
+4. **Chitchat.** `hola` → respuesta breve, **sin ningún artefacto** (ni tabla, ni citas, ni tarjeta).
+
+> Si un artefacto **no aparece** (mensaje sin tabla/citas/tarjeta, o un placeholder de "tool"):
+> es el render del content-part `tool-call`. Ya se aplicó el hedge `result` + `status:complete` en
+> `lib/messageParts.ts` (`toContent`). Si aún fallara, revisar que los Tool UIs estén registrados en
+> `<Thread tools={[…]}>` (`app/page.tsx`) y los `toolName` (`praxia_sources` / `praxia_sql_table` /
+> `praxia_confirm`) coincidan entre el reducer y `components/toolUIs.tsx`.

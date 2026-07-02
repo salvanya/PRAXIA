@@ -100,6 +100,15 @@ async def _sse_event_stream(graph: Any, inp: Any, config: dict) -> AsyncIterator
                 yield {"event": "token", "data": chunk["text"]}
             elif kind == "sources":
                 yield {"event": "sources", "data": json.dumps(chunk["sources"], ensure_ascii=False)}
+            elif kind == "table":
+                yield {
+                    "event": "table",
+                    "data": json.dumps(
+                        {"columns": chunk["columns"], "rows": chunk["rows"], "sql": chunk["sql"]},
+                        ensure_ascii=False,
+                        default=str,
+                    ),
+                }
         elif mode == "updates" and isinstance(chunk, dict) and "__interrupt__" in chunk:
             interrupts = chunk["__interrupt__"]
             value = interrupts[0].value if interrupts else {}

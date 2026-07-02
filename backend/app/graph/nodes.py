@@ -37,6 +37,10 @@ def write_sources(sources: list[dict]) -> None:
     get_stream_writer()({"kind": "sources", "sources": sources})
 
 
+def write_table(columns: list[str], rows: list[dict], sql: str) -> None:
+    get_stream_writer()({"kind": "table", "columns": columns, "rows": rows, "sql": sql})
+
+
 def _chitchat_llm() -> Any:
     from app.llm import make_llm
 
@@ -112,6 +116,9 @@ async def sql_node(state: AgentState) -> dict:
         answer = await synthesize_sql_answer(last_user_text(state), result.rows, result.columns)
         for piece in _stream_chunks(answer):
             write_token(piece)
+        is_tabular = bool(result.rows) and not (len(result.rows) == 1 and len(result.columns) == 1)
+        if is_tabular:
+            write_table(result.columns, result.rows, result.sql or "")
         write_sources([])
     return {
         "sources": [],

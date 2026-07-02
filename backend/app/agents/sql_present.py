@@ -7,8 +7,8 @@ SQL_EMPTY_MESSAGE = "No encontré resultados para esa consulta."
 
 SYNTH_SYSTEM = (
     "Sos el asistente de una práctica profesional. Respondé en español SOLO con los datos "
-    "provistos. No inventes ni calcules números nuevos. Si hay varias filas, podés mostrarlas "
-    "en una tabla markdown. Sé breve."
+    "provistos. No inventes ni calcules números nuevos. NO incluyas una tabla en tu respuesta: "
+    "la tabla se muestra por separado. Resumí en UNA sola frase breve. Sé conciso."
 )
 
 
@@ -43,11 +43,15 @@ def _grounded(answer: str, rows: list[dict]) -> bool:
     return all(any(num in c for c in cells) or num == n for num in _numbers(answer))
 
 
+def _has_md_table(text: str) -> bool:
+    return any(line.lstrip().startswith("|") for line in text.splitlines())
+
+
 def _deterministic(rows: list[dict], columns: list[str]) -> str:
     cols = columns or list(rows[0].keys())
     if len(rows) == 1 and len(cols) == 1:
         return f"Resultado: {_fmt(list(rows[0].values())[0])}"
-    return render_rows_markdown(rows, columns)
+    return f"Encontré {len(rows)} resultado(s)."
 
 
 async def synthesize_sql_answer(
@@ -60,6 +64,6 @@ async def synthesize_sql_answer(
     messages = [("system", SYNTH_SYSTEM), ("human", f"Pregunta: {question}\n\nDatos:\n{table}")]
     resp = await llm.ainvoke(messages)
     answer = (getattr(resp, "content", "") or "").strip()
-    if not answer or not _grounded(answer, rows):
+    if not answer or not _grounded(answer, rows) or _has_md_table(answer):
         return _deterministic(rows, columns)
     return answer

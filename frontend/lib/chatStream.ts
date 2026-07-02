@@ -11,9 +11,16 @@ export interface ProposedAction {
   params: Record<string, unknown>;
 }
 
+export interface SqlTablePayload {
+  columns: string[];
+  rows: Record<string, unknown>[];
+  sql: string;
+}
+
 export type ChatEvent =
   | { type: "token"; text: string }
   | { type: "sources"; sources: Source[] }
+  | { type: "table"; table: SqlTablePayload }
   | { type: "confirm"; threadId: string; action: ProposedAction }
   | { type: "done" };
 
@@ -27,6 +34,7 @@ function parseEvent(raw: string): ChatEvent | null {
   const data = dataLines.join("\n");
   if (event === "token") return { type: "token", text: data };
   if (event === "sources") return { type: "sources", sources: JSON.parse(data) as Source[] };
+  if (event === "table") return { type: "table", table: JSON.parse(data) as SqlTablePayload };
   if (event === "confirm") {
     const parsed = JSON.parse(data) as { thread_id: string; action: ProposedAction };
     return { type: "confirm", threadId: parsed.thread_id, action: parsed.action };
