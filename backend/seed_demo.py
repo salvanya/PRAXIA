@@ -15,23 +15,7 @@ from faker import Faker
 
 from app import db
 from app.config import get_settings
-from app.ingest.pipeline import ingest_document
-
-_PROTOCOLO_TEXT = """\
-Protocolo de atención — Práctica Demo
-
-Duración de las consultas
-La primera consulta dura 60 minutos. Las consultas de seguimiento duran 30 minutos.
-
-Política de cancelaciones
-Las cancelaciones deben avisarse con al menos 24 horas de anticipación.
-
-Modalidad de atención
-Las sesiones se ofrecen de forma presencial y por telellamada, según la preferencia del paciente.
-
-Preparación de la primera consulta
-Se recomienda traer estudios previos y una lista de la medicación actual.
-"""
+from app.eval.fixtures import ensure_rag_fixture
 
 _NS = uuid.UUID("00000000-0000-0000-0000-0000000000aa")
 _APPT_STATUS = ["programado", "confirmado", "atendido", "ausente", "cancelado"]
@@ -117,18 +101,13 @@ async def seed_demo() -> dict[str, int]:
             rng.choice(["presencial", "telellamada"]),
         )
 
-    summary = await ingest_document(
-        _PROTOCOLO_TEXT.encode("utf-8"),
-        "protocolo.txt",
-        "protocolo",
-        "Protocolo de atención",
-    )
+    n_chunks = await ensure_rag_fixture()
 
     return {
         "practitioners": len(practitioners),
         "clients": len(clients),
         "appointments": len(starts),
-        "documents": summary["n_chunks"],
+        "documents": n_chunks,
     }
 
 

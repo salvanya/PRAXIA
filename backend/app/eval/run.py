@@ -8,6 +8,7 @@ from app import db
 from app.eval import baseline as _baseline
 from app.eval.cases import EvalCase, load_golden_set
 from app.eval.checks import deterministic_failures, execution_accuracy
+from app.eval.fixtures import ensure_rag_fixture
 from app.eval.harness import run_case
 from app.eval.metrics import MetricScores, RagSample, score_rag_cases
 
@@ -60,6 +61,8 @@ async def evaluate_gate(
     outcomes: list[CaseOutcome] = []
     samples: list[RagSample] = []
     try:
+        # el gate garantiza su fixture RAG (self-heal del wipe de Qdrant por la suite)
+        await ensure_rag_fixture()
         for case in cases:
             outcome, sample = await _score_case(case)
             outcomes.append(outcome)

@@ -9,7 +9,11 @@ Corre el golden set end-to-end por el grafo real y decide pass/fail:
 
 ## Correr
 
-Requiere `docker compose up -d` + `seed_demo.py` + Ollama (`gemma4:12b` y `gemma4:e4b`).
+Requiere `docker compose up -d` + Ollama (`gemma4:12b` y `gemma4:e4b`).
+
+El gate auto-siembra su propio corpus RAG mínimo (`fixtures.py → ensure_rag_fixture`) antes de
+correr los casos. `seed_demo.py` sigue siendo necesario para los datos relacionales (turnos,
+clientes, practitioners) que usan los casos SQL; el corpus RAG ya no requiere un seed manual previo.
 
 ```bash
 cd backend

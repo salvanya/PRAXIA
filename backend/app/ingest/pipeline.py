@@ -18,7 +18,10 @@ async def ingest_document(data: bytes, filename: str, doc_type: str, title: str)
     existing = await db.find_document_by_hash(s.practice_id, content_hash)
     if existing is not None:
         if existing["status"] == "indexado":
-            n_chunks = await vectorstore.count_chunks(existing["id"], s.practice_id)
+            try:
+                n_chunks = await vectorstore.count_chunks(existing["id"], s.practice_id)
+            except Exception:  # noqa: BLE001 - colección ausente → tratar como drift (0 chunks)
+                n_chunks = 0
             if n_chunks > 0:
                 return DocumentSummary(
                     document_id=existing["id"], status="indexado", n_chunks=n_chunks
