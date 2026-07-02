@@ -6,6 +6,11 @@ from app.models import Chunk
 
 GOLDEN_SET_PATH = Path(__file__).with_name("golden_set.jsonl")
 
+_BEHAVIORS = frozenset({"cited_answer", "abstain_no_sources", "sql_answer"})
+_INTENTS = frozenset(
+    {"rag", "sql", "action", "chitchat", "out_of_scope"}
+)  # espejo de app.graph.router.INTENTS
+
 
 @dataclass
 class EvalCase:
@@ -32,6 +37,12 @@ class CaseResult:
 def _validate(case: EvalCase) -> None:
     if case.category not in ("rag", "sql"):
         raise ValueError(f"category invalida {case.category!r} en {case.question!r}")
+    if case.expected_behavior not in _BEHAVIORS:
+        raise ValueError(
+            f"expected_behavior inválido {case.expected_behavior!r} en {case.question!r}"
+        )
+    if case.intent not in _INTENTS:
+        raise ValueError(f"intent inválido {case.intent!r} en {case.question!r}")
     if case.expected_behavior == "cited_answer":
         if not case.ground_truth:
             raise ValueError(f"cited_answer requiere ground_truth en {case.question!r}")

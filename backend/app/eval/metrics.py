@@ -58,8 +58,10 @@ def _metric_llm() -> Any:
 
 async def _judge_yes(system: str, human: str, llm: Any) -> bool:
     structured = llm.with_structured_output(YesNoVerdict)
-    verdict: YesNoVerdict = await structured.ainvoke([("system", system), ("human", human)])
-    return bool(verdict.yes)
+    verdict = await structured.ainvoke([("system", system), ("human", human)])
+    # Gemma local puede devolver None intermitente en structured-output (gotcha del router);
+    # un juez que no decide NO acredita la métrica.
+    return bool(verdict.yes) if verdict is not None else False
 
 
 async def _score_sample(sample: RagSample, llm: Any) -> tuple[float, float, float, float]:

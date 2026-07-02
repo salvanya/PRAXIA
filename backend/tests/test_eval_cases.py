@@ -55,6 +55,30 @@ def test_sql_requires_gold_sql(tmp_path: Path) -> None:
         load_golden_set(path)
 
 
+def test_invalid_expected_behavior_raises(tmp_path: Path) -> None:
+    path = _write(
+        tmp_path,
+        [
+            '{"question":"q","category":"rag","intent":"rag",'
+            '"expected_behavior":"cited","must_include":["x"],"ground_truth":"ref"}'
+        ],
+    )
+    with pytest.raises(ValueError, match="expected_behavior"):
+        load_golden_set(path)
+
+
+def test_invalid_intent_raises(tmp_path: Path) -> None:
+    path = _write(
+        tmp_path,
+        [
+            '{"question":"q","category":"rag","intent":"raggg",'
+            '"expected_behavior":"cited_answer","must_include":["x"],"ground_truth":"ref"}'
+        ],
+    )
+    with pytest.raises(ValueError, match="intent"):
+        load_golden_set(path)
+
+
 def test_real_golden_set_loads() -> None:
     cases = load_golden_set()  # el archivo versionado, schema nuevo
     assert len(cases) >= 4

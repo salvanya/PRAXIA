@@ -82,7 +82,12 @@ async def evaluate_gate(
         metrics["execution_accuracy"] = passed / len(sql_outcomes)
 
     base = _baseline.load_baseline()
-    regs = _baseline.regressions(base, metrics, tolerance)
+    compare_base = base
+    if base is not None and only is not None:
+        # Corrida parcial (--only): comparar SOLO las familias de métrica que este modo
+        # produce; si no, las familias ausentes se leen como 0.0 y disparan falsas regresiones.
+        compare_base = {k: v for k, v in base.items() if k in metrics}
+    regs = _baseline.regressions(compare_base, metrics, tolerance)
     hard = sum(1 for o in outcomes if o.failures)
     exit_code = gate_exit_code(hard, regs)
 
