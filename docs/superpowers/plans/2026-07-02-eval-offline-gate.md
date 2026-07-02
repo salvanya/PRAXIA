@@ -2,225 +2,220 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Construir una suite de eval offline que corra el golden set end-to-end por el grafo real y emita un gate pass/fail (aserciones deterministas duras + métricas Ragas con baseline-diff).
+**Goal:** Construir una suite de eval offline que corra el golden set end-to-end por el grafo real y emita un gate pass/fail (aserciones deterministas duras + métricas por LLM-as-judge local con baseline-diff).
 
-**Architecture:** Módulos nuevos bajo `backend/app/eval/`: `cases` (tipos + loader), `harness` (corre un caso por el grafo → `CaseResult`), `checks` (aserciones deterministas + execution-accuracy), `ragas_metrics` (Ragas aislado tras una interfaz propia), `baseline` (load/save/diff), `run` (CLI + gate). La churn de Ragas queda encapsulada: solo `ragas_metrics.score_rag_cases` toca símbolos de la librería. Todo local ($0): LM=`gemma4:12b` vía Ollama, embeddings=`bge-m3` reusando el singleton ya cargado.
+**Architecture:** Módulos nuevos bajo `backend/app/eval/`: `cases` (tipos + loader), `harness` (corre un caso por el grafo → `CaseResult`), `checks` (aserciones deterministas + execution-accuracy), `metrics` (4 métricas por juez LLM local tras una interfaz propia), `baseline` (load/save/diff), `run` (CLI + gate). Las métricas se miden con jueces LLM locales (reusando `rag/judges.py`), **no** con Ragas (incompatible con el stack congelado de Fase 1). Todo local ($0): LM=`gemma4:12b` vía Ollama; cero dependencias nuevas.
 
-**Tech Stack:** Python 3.12, pytest (`asyncio_mode=auto`), LangGraph 0.2.*, langchain-ollama 0.2.*, sentence-transformers 3.*, asyncpg 0.30.*, **ragas (nuevo, pineado en la Tarea 1)**.
+**Tech Stack:** Python 3.12, pytest (`asyncio_mode=auto`), LangGraph 0.2.*, langchain-ollama 0.2.*, sentence-transformers 3.*, asyncpg 0.30.*. **Sin dependencias nuevas** — métricas por LLM-as-judge local reusando `rag/judges.py`.
 
 ## Global Constraints
 
-- **Local-first / $0:** cero red saliente nueva del producto. LM de Ragas = Ollama local (`gemma4:12b`); embeddings = `bge-m3` local reusando `app.embeddings._model()`. Ragas es OSS self-hosteado; **su path de OpenAI NO se usa**.
+- **Local-first / $0:** cero red saliente nueva del producto y **cero dependencias nuevas**. Las métricas se miden con jueces LLM LOCALES (`gemma4:12b` vía Ollama), reusando `rag/judges.py`. Prohibido `ragas`/`openai` (incompatibles con el stack de Fase 1 y con el contrato).
 - **Multi-tenant:** todos los casos corren con `get_settings().practice_id`; el grafo filtra por `practice_id` como siempre. No se agregan caminos que lo esquiven.
 - **Gate rápido intacto:** `pytest -m "not llm"` (272) **no regresiona**. Los tests que tocan Ollama/PG/Qdrant van marcados `eval` o `llm` y quedan FUERA del gate rápido.
 - **Lint/type:** `ruff format` **antes** de `ruff check` (line-length 100, reglas E/F/I/UP/B). Si `ruff check` marca **I001** (orden de imports), corré `ruff check --fix <archivos>` (autofix determinista y seguro) y volvé a chequear. `mypy backend/app --config-file backend/pyproject.toml` (`disallow_untyped_defs=true` → toda función en `app/` lleva anotaciones de tipo).
 - **Marcado de tests:** los tests que tocan Ollama/PG/Qdrant llevan **`@pytest.mark.eval` Y `@pytest.mark.llm`** (el `llm` los saca del gate rápido `-m "not llm"`; el `eval` los agrupa para `-m eval`). Los tests puros (cases/checks/baseline/harness/exit-code) NO llevan marker → corren en el gate rápido.
 - **Commits LIMPIOS:** sin ninguna atribución a Claude (ni trailer `Co-Authored-By`, ni firma, ni mención). Autor = el usuario. Conventional commits en español (`feat(eval):`, `test(eval):`).
 - **Rama:** `fase-2/slice-eval-offline-gate` (ya creada; el spec está commiteado en `f5a1e74`).
-- **Ragas aislado:** ninguna otra parte del código importa `ragas`; solo `app/eval/ragas_metrics.py`.
+- **Motor de métricas aislado:** solo `app/eval/metrics.py` implementa los jueces de métricas (reusando `rag/judges.py`); ninguna otra parte del código cambia por esto.
 
 ---
 
-### Task 1: Spike Ragas + wrapper aislado de métricas (`ragas_metrics.py`)
+### Task 1: Módulo de métricas por LLM-as-judge local (`metrics.py`)
 
-De-riesga toda la incertidumbre de la librería primero. Fija la versión, confirma que importa sin OpenAI, y deja la interfaz propia (`RagSample`/`RagasAggregates`/`score_rag_cases`) que el resto del plan consume. El smoke necesita Ollama → test marcado `eval` y **síncrono** (Ragas maneja su propio event loop; un test async chocaría con "event loop already running").
+**Pivot (2026-07-02):** la librería Ragas es incompatible con el stack congelado de Fase 1 (0.2.x exige `langchain-core` 1.x; 0.1.x baja `langchain-core` a 0.2.43 + arrastra `openai`) → se descarta Ragas y se miden las 4 métricas con **jueces LLM locales** (`gemma4:12b`), reusando `rag/judges.py` para faithfulness. **Cero dependencias nuevas.** La interfaz aislada (`RagSample`/`MetricScores`/`score_rag_cases`) es la que el resto del plan consume; solo este módulo implementa los jueces de métricas.
 
 **Files:**
-- Modify: `backend/requirements.txt` (agregar `ragas`)
-- Modify: `backend/app/embeddings.py` (agregar `encode_sync`)
 - Modify: `backend/pyproject.toml` (registrar el marker `eval` — se usa por primera vez acá)
 - Create: `backend/app/eval/__init__.py`
-- Create: `backend/app/eval/ragas_metrics.py`
-- Test: `backend/tests/test_eval_ragas_metrics.py`
+- Create: `backend/app/eval/metrics.py`
+- Test: `backend/tests/test_eval_metrics.py`
 
 **Interfaces:**
-- Consumes: `app.embeddings._encode` (sync, reusa el `SentenceTransformer` singleton), `app.llm.make_llm`, `app.config.get_settings`.
+- Consumes: `app.llm.make_llm`, `app.config.get_settings`, `app.models.Chunk`, `app.rag.judges.judge_groundedness`, `app.rag.synthesize.chunks_text`.
 - Produces:
-  - `RagSample(question: str, answer: str, contexts: list[str], ground_truth: str)` (dataclass)
-  - `RagasAggregates(faithfulness: float, answer_relevancy: float, context_precision: float, context_recall: float)` (dataclass)
-  - `score_rag_cases(samples: list[RagSample]) -> RagasAggregates` (**síncrona**; el caller async la invoca con `asyncio.to_thread`)
-  - `app.embeddings.encode_sync(texts: list[str]) -> list[list[float]]`
+  - `RagSample(question: str, answer: str, contexts: list[Chunk], ground_truth: str)` (dataclass)
+  - `MetricScores(faithfulness: float, answer_relevancy: float, context_precision: float, context_recall: float)` (dataclass)
+  - `async score_rag_cases(samples: list[RagSample], llm: Any = None) -> MetricScores` (async; pega a Ollama, sin threads)
 
-- [ ] **Step 1: Pinear e instalar ragas + smoke-import (spike)**
+- [ ] **Step 1: Registrar el marker `eval` en `pyproject.toml`**
 
-Agregar al final de `backend/requirements.txt`:
-
-```
-ragas==0.2.*
-```
-
-Instalar y confirmar que importa sin exigir OpenAI (correr desde la raíz del repo):
-
-```bash
-backend/.venv/Scripts/python -m pip install "ragas==0.2.*"
-backend/.venv/Scripts/python -c "import ragas; from ragas import EvaluationDataset, evaluate; from ragas.llms import LangchainLLMWrapper; from ragas.embeddings import LangchainEmbeddingsWrapper; from ragas.metrics import Faithfulness, ResponseRelevancy, LLMContextPrecisionWithReference, LLMContextRecall; print('ragas', ragas.__version__, 'OK')"
-```
-
-Expected: imprime `ragas 0.2.x OK` sin pedir `OPENAI_API_KEY` ni acceso a red.
-
-**Si algún símbolo no existe** (la API de Ragas cambió entre minors): anotar los nombres reales y ajustar los imports/columnas en el Step 4. **Si la resolución de pip entra en conflicto** con `langchain-ollama==0.2.*` / `langgraph==0.2.*`: registrar el conflicto exacto y —según el riesgo 1 del spec— **frenar y avisar** antes de bajar/subir pins de langchain.
-
-- [ ] **Step 2: Agregar `encode_sync` a `app/embeddings.py`**
-
-Insertar después de la función `_encode` (antes de `embed_texts`):
-
-```python
-def encode_sync(texts: list[str]) -> list[list[float]]:
-    """Embeddings SÍNCRONOS reusando el MISMO SentenceTransformer singleton (_model),
-    para el adapter de Ragas en la suite de eval. No recarga el modelo."""
-    return _encode(texts)
-```
-
-Registrar el marker `eval` en `backend/pyproject.toml` (se usa por primera vez en el Step 3).
-Dentro de `[tool.pytest.ini_options]`, en la lista `markers`, agregar como último ítem:
+Se usa por primera vez en el Step 2. En `backend/pyproject.toml`, dentro de `[tool.pytest.ini_options]`, en la lista `markers`, agregar como último ítem:
 
 ```toml
     "eval: runs the full offline eval gate (needs Postgres/Qdrant + Ollama + seed demo)",
 ```
 
-- [ ] **Step 3: Escribir el test smoke (falla)**
+- [ ] **Step 2: Escribir el test smoke (falla)**
 
-Create `backend/tests/test_eval_ragas_metrics.py`:
+`score_rag_cases` es **async** (jueces LLM locales); el smoke es un test async marcado `eval`+`llm` (necesita Ollama; NO corre en `-m "not llm"`).
+
+Create `backend/tests/test_eval_metrics.py`:
 
 ```python
 import pytest
 
-from app.eval.ragas_metrics import RagSample, score_rag_cases
+from app.eval.metrics import RagSample, score_rag_cases
+from app.models import Chunk
 
 
 @pytest.mark.eval
 @pytest.mark.llm
-def test_score_rag_cases_smoke() -> None:
-    """Sync a propósito: Ragas maneja su propio event loop."""
+async def test_score_rag_cases_smoke() -> None:
+    ctx: Chunk = {
+        "text": "La primera consulta tiene una duración de 60 minutos.",
+        "page": 1,
+        "chunk_index": 0,
+        "document_id": "d1",
+        "title": "protocolo",
+        "doc_type": "protocolo",
+    }
     samples = [
         RagSample(
             question="¿cuánto dura la primera consulta?",
             answer="La primera consulta dura 60 minutos.",
-            contexts=["La primera consulta tiene una duración de 60 minutos."],
+            contexts=[ctx],
             ground_truth="La primera consulta dura 60 minutos.",
         )
     ]
-    agg = score_rag_cases(samples)
+    scores = await score_rag_cases(samples)
     for value in (
-        agg.faithfulness,
-        agg.answer_relevancy,
-        agg.context_precision,
-        agg.context_recall,
+        scores.faithfulness,
+        scores.answer_relevancy,
+        scores.context_precision,
+        scores.context_recall,
     ):
         assert 0.0 <= value <= 1.0
 ```
 
-- [ ] **Step 4: Run test para verificar que falla**
+- [ ] **Step 3: Run test para verificar que falla**
 
-Run: `backend/.venv/Scripts/python -m pytest backend/tests/test_eval_ragas_metrics.py -v`
-Expected: FAIL con `ModuleNotFoundError: No module named 'app.eval.ragas_metrics'`.
+Run: `backend/.venv/Scripts/python -m pytest backend/tests/test_eval_metrics.py -v`
+Expected: FAIL con `ModuleNotFoundError: No module named 'app.eval.metrics'`.
 
-- [ ] **Step 5: Implementar `ragas_metrics.py`**
+- [ ] **Step 4: Implementar `metrics.py`**
 
 Create `backend/app/eval/__init__.py` (vacío).
 
-Create `backend/app/eval/ragas_metrics.py`:
+Create `backend/app/eval/metrics.py`:
 
 ```python
+import asyncio
 from dataclasses import dataclass
 from typing import Any
 
-from langchain_core.embeddings import Embeddings
+from pydantic import BaseModel
 
 from app.config import get_settings
-from app.embeddings import encode_sync
 from app.llm import make_llm
+from app.models import Chunk
+from app.rag.judges import judge_groundedness
+from app.rag.synthesize import chunks_text
 
 
 @dataclass
 class RagSample:
     question: str
     answer: str
-    contexts: list[str]
+    contexts: list[Chunk]
     ground_truth: str
 
 
 @dataclass
-class RagasAggregates:
+class MetricScores:
     faithfulness: float
     answer_relevancy: float
     context_precision: float
     context_recall: float
 
 
-class BgeM3Adapter(Embeddings):
-    """LangChain Embeddings (sync) sobre el bge-m3 ya cargado en app.embeddings."""
-
-    def embed_documents(self, texts: list[str]) -> list[list[float]]:
-        return encode_sync(texts)
-
-    def embed_query(self, text: str) -> list[float]:
-        return encode_sync([text])[0]
+class _YesNo(BaseModel):
+    yes: bool
+    reason: str
 
 
-def score_rag_cases(samples: list[RagSample]) -> RagasAggregates:
-    """Métricas Ragas (LLM=gemma4:12b local, embeddings=bge-m3 local) sobre casos RAG
-    con respuesta grounded. SÍNCRONA: Ragas gestiona su propio event loop, así que el
-    caller async debe invocarla vía asyncio.to_thread (gotcha del loop)."""
-    # Símbolos CONFIRMADOS en el spike (Step 1) contra la versión pineada de ragas.
-    from ragas import EvaluationDataset, evaluate
-    from ragas.embeddings import LangchainEmbeddingsWrapper
-    from ragas.llms import LangchainLLMWrapper
-    from ragas.metrics import (
-        Faithfulness,
-        LLMContextPrecisionWithReference,
-        LLMContextRecall,
-        ResponseRelevancy,
+_RELEVANCY_PROMPT = (
+    "Sos un evaluador de un CRM para prácticas profesionales. Dada una PREGUNTA y una "
+    "RESPUESTA, decidí si la respuesta aborda directamente lo que se preguntó. yes=true solo "
+    "si responde la pregunta (no evasiva, no off-topic). Incluí una razón breve en español."
+)
+_PRECISION_PROMPT = (
+    "Sos un evaluador de retrieval de un CRM. Dada una PREGUNTA y unos FRAGMENTOS recuperados, "
+    "decidí si los fragmentos son RELEVANTES a la pregunta (no ruido off-topic). yes=true si al "
+    "menos parte de los fragmentos aporta a responder la pregunta. Razón breve en español."
+)
+_RECALL_PROMPT = (
+    "Sos un evaluador de retrieval de un CRM. Dada una RESPUESTA DE REFERENCIA y unos FRAGMENTOS "
+    "recuperados, decidí si los fragmentos CONTIENEN la información necesaria para fundamentar "
+    "esa respuesta de referencia. yes=true solo si la info de la referencia está en los "
+    "fragmentos. Razón breve en español."
+)
+
+
+def _metric_llm() -> Any:
+    """gemma4:12b para métricas más estables (decisión de brainstorming); el e4b sigue
+    para los jueces online del grafo."""
+    return make_llm(get_settings().ollama_model, temperature=0.0)
+
+
+async def _judge_yes(system: str, human: str, llm: Any) -> bool:
+    structured = llm.with_structured_output(_YesNo)
+    verdict: _YesNo = await structured.ainvoke([("system", system), ("human", human)])
+    return bool(verdict.yes)
+
+
+async def _score_sample(sample: RagSample, llm: Any) -> tuple[float, float, float, float]:
+    ctx = chunks_text(sample.contexts)
+    grounded, relevancy, precision, recall = await asyncio.gather(
+        judge_groundedness(sample.answer, sample.contexts, llm=llm),
+        _judge_yes(
+            _RELEVANCY_PROMPT,
+            f"PREGUNTA: {sample.question}\n\nRESPUESTA:\n{sample.answer}",
+            llm,
+        ),
+        _judge_yes(_PRECISION_PROMPT, f"PREGUNTA: {sample.question}\n\nFRAGMENTOS:\n{ctx}", llm),
+        _judge_yes(
+            _RECALL_PROMPT,
+            f"RESPUESTA DE REFERENCIA: {sample.ground_truth}\n\nFRAGMENTOS:\n{ctx}",
+            llm,
+        ),
     )
+    return (1.0 if grounded.grounded else 0.0, float(relevancy), float(precision), float(recall))
 
-    llm = LangchainLLMWrapper(make_llm(get_settings().ollama_model, 0.0))
-    embeddings = LangchainEmbeddingsWrapper(BgeM3Adapter())
-    dataset = EvaluationDataset.from_list(
-        [
-            {
-                "user_input": s.question,
-                "response": s.answer,
-                "retrieved_contexts": s.contexts,
-                "reference": s.ground_truth,
-            }
-            for s in samples
-        ]
-    )
-    metrics: list[Any] = [
-        Faithfulness(),
-        ResponseRelevancy(),
-        LLMContextPrecisionWithReference(),
-        LLMContextRecall(),
-    ]
-    result = evaluate(dataset=dataset, metrics=metrics, llm=llm, embeddings=embeddings)
-    frame = result.to_pandas()
-    # Leer columnas por el .name real de cada métrica (robusto al string exacto).
-    means = {metric.name: float(frame[metric.name].mean()) for metric in metrics}
-    names = [metric.name for metric in metrics]
-    return RagasAggregates(
-        faithfulness=means[names[0]],
-        answer_relevancy=means[names[1]],
-        context_precision=means[names[2]],
-        context_recall=means[names[3]],
+
+async def score_rag_cases(samples: list[RagSample], llm: Any = None) -> MetricScores:
+    """4 métricas por juez LLM LOCAL (gemma4:12b) sobre casos RAG con respuesta grounded.
+    faithfulness reusa judge_groundedness (rag/judges.py); relevancy/precision/recall son
+    jueces booleanos; el score de cada métrica = promedio de los booleanos por caso."""
+    if not samples:
+        return MetricScores(0.0, 0.0, 0.0, 0.0)
+    llm = llm or _metric_llm()
+    results = await asyncio.gather(*(_score_sample(s, llm) for s in samples))
+    n = len(results)
+    return MetricScores(
+        faithfulness=sum(r[0] for r in results) / n,
+        answer_relevancy=sum(r[1] for r in results) / n,
+        context_precision=sum(r[2] for r in results) / n,
+        context_recall=sum(r[3] for r in results) / n,
     )
 ```
 
-> Si el spike (Step 1) encontró nombres distintos de métricas/campos/dataset, ajustá **solo** los imports y las claves del dict `from_list` aquí; la interfaz pública (`RagSample`/`RagasAggregates`/`score_rag_cases`) no cambia.
+> Nota: los jueces usan `with_structured_output(_YesNo)` con un campo `bool` — el patrón confiable en Gemma local (structured OK para bool/enum; gotcha del router). `judge_groundedness` ya existe en `rag/judges.py` y acepta `llm=`; acá se le pasa el 12b.
 
-- [ ] **Step 6: Run test smoke (pasa, requiere Ollama)**
+- [ ] **Step 5: Run test smoke (pasa, requiere Ollama)**
 
-Requisitos: `ollama list` muestra `gemma4:12b`; primera corrida descarga bge-m3 si no está.
-Run: `backend/.venv/Scripts/python -m pytest backend/tests/test_eval_ragas_metrics.py -m eval -v`
-Expected: PASS (4 métricas en `[0,1]`). Puede tardar (LLM local por métrica).
+Requisitos: `ollama list` muestra `gemma4:12b`. Solo necesita Ollama (sin PG/Qdrant).
+Run: `backend/.venv/Scripts/python -m pytest backend/tests/test_eval_metrics.py -m eval -v`
+Expected: PASS (4 métricas en `[0,1]`). Puede tardar (4 jueces LLM locales por caso).
 
-- [ ] **Step 7: Lint + type + commit**
+- [ ] **Step 6: Lint + type + commit**
 
 ```bash
-backend/.venv/Scripts/python -m ruff format backend/app/eval backend/app/embeddings.py backend/tests/test_eval_ragas_metrics.py
-backend/.venv/Scripts/python -m ruff check backend/app/eval backend/app/embeddings.py backend/tests/test_eval_ragas_metrics.py
+backend/.venv/Scripts/python -m ruff format backend/app/eval backend/tests/test_eval_metrics.py
+backend/.venv/Scripts/python -m ruff check backend/app/eval backend/tests/test_eval_metrics.py
 backend/.venv/Scripts/python -m mypy backend/app --config-file backend/pyproject.toml
-git add backend/requirements.txt backend/app/embeddings.py backend/pyproject.toml backend/app/eval/__init__.py backend/app/eval/ragas_metrics.py backend/tests/test_eval_ragas_metrics.py
-git commit -m "feat(eval): wrapper aislado de metricas Ragas (LM 12b + bge-m3) + spike de version"
+git add backend/pyproject.toml backend/app/eval/__init__.py backend/app/eval/metrics.py backend/tests/test_eval_metrics.py
+git commit -m "feat(eval): metricas por LLM-as-judge local (faithfulness/relevance/precision/recall, 12b)"
 ```
 
 Expected: lint/mypy limpios; commit creado.
@@ -829,7 +824,7 @@ Orquesta todo, arma el reporte, escribe `last_run.json`, decide el exit code, y 
 - (El marker `eval` ya quedó registrado en `pyproject.toml` en la Task 1.)
 
 **Interfaces:**
-- Consumes: `app.eval.cases.load_golden_set`, `app.eval.harness.run_case`, `app.eval.checks.{deterministic_failures,execution_accuracy}`, `app.eval.ragas_metrics.{RagSample,score_rag_cases}`, `app.eval.baseline`, `app.db.close_pool`.
+- Consumes: `app.eval.cases.load_golden_set`, `app.eval.harness.run_case`, `app.eval.checks.{deterministic_failures,execution_accuracy}`, `app.eval.metrics.{RagSample,score_rag_cases}`, `app.eval.baseline`, `app.db.close_pool`.
 - Produces:
   - `gate_exit_code(hard_failures: int, regressions: list[str]) -> int`
   - `evaluate_gate(only: str | None = None, tolerance: float = 0.05, update_baseline: bool = False) -> GateOutcome`
@@ -890,7 +885,7 @@ from app.eval import baseline as _baseline
 from app.eval.cases import EvalCase, load_golden_set
 from app.eval.checks import deterministic_failures, execution_accuracy
 from app.eval.harness import run_case
-from app.eval.ragas_metrics import RagasAggregates, RagSample, score_rag_cases
+from app.eval.metrics import MetricScores, RagSample, score_rag_cases
 
 LAST_RUN_PATH = Path(__file__).with_name("last_run.json")
 
@@ -925,7 +920,7 @@ async def _score_case(case: EvalCase) -> tuple[CaseOutcome, RagSample | None]:
         sample = RagSample(
             question=case.question,
             answer=result.answer,
-            contexts=[chunk["text"] for chunk in result.retrieved],
+            contexts=result.retrieved,
             ground_truth=case.ground_truth,
         )
     return CaseOutcome(question=case.question, category=case.category, failures=failures), sample
@@ -951,8 +946,7 @@ async def evaluate_gate(
 
     metrics: dict[str, float] = {}
     if samples:
-        # Ragas gestiona su propio event loop -> correrlo en un thread aparte.
-        agg: RagasAggregates = await asyncio.to_thread(score_rag_cases, samples)
+        agg: MetricScores = await score_rag_cases(samples)
         metrics["faithfulness"] = agg.faithfulness
         metrics["answer_relevancy"] = agg.answer_relevancy
         metrics["context_precision"] = agg.context_precision
@@ -1075,7 +1069,7 @@ backend/.venv/Scripts/python -m ruff format backend/app/db.py backend/app/eval/r
 backend/.venv/Scripts/python -m ruff check backend/app/db.py backend/app/eval/run.py backend/tests/test_eval_run.py backend/tests/test_eval_gate.py
 backend/.venv/Scripts/python -m mypy backend/app --config-file backend/pyproject.toml
 git add backend/app/db.py backend/app/eval/run.py .gitignore backend/tests/test_eval_run.py backend/tests/test_eval_gate.py
-git commit -m "feat(eval): CLI + gate (aserciones duras + Ragas baseline-diff) + wrapper pytest eval"
+git commit -m "feat(eval): CLI + gate (aserciones duras + jueces baseline-diff) + wrapper pytest eval"
 ```
 
 ---
@@ -1130,7 +1124,7 @@ Expected: mismos casos PASS; sin regresión; `exit=0`.
 backend/.venv/Scripts/python -m pytest backend/tests -m eval -q
 ```
 
-Expected: `test_eval_gate_green` PASS + el smoke de `ragas_metrics` PASS.
+Expected: `test_eval_gate_green` PASS + el smoke de `metrics` PASS.
 
 - [ ] **Step 6: Escribir `backend/app/eval/README.md`**
 
@@ -1142,8 +1136,9 @@ Create `backend/app/eval/README.md`:
 Corre el golden set end-to-end por el grafo real y decide pass/fail:
 - **Aserciones deterministas por-caso** (gate duro): intent, citas/abstención, `must_include`,
   y execution-accuracy del SQL (result-set gold vs candidato).
-- **Métricas Ragas** (faithfulness / answer_relevancy / context_precision / context_recall,
-  LM=`gemma4:12b`, embeddings=`bge-m3`) comparadas contra `baseline.json` con tolerancia.
+- **Métricas por LLM-as-judge local** (faithfulness / answer_relevancy / context_precision /
+  context_recall, LM=`gemma4:12b`, reusando `rag/judges.py`) comparadas contra `baseline.json`
+  con tolerancia.
 
 ## Correr
 
@@ -1161,7 +1156,7 @@ O como test: `python -m pytest backend/tests -m eval -q`.
 
 ## Archivos
 - `golden_set.jsonl` — casos (versionado; crece con cada bug arreglado).
-- `baseline.json` — línea base de métricas Ragas + execution-accuracy (**se commitea**).
+- `baseline.json` — línea base de métricas de jueces + execution-accuracy (**se commitea**).
 - `last_run.json` — resultado de la última corrida (**gitignored**).
 ```
 
@@ -1180,5 +1175,5 @@ Expected: `last_run.json` NO aparece en el commit (gitignored). `baseline.json` 
 
 - **Gates:** `-m "not llm"` sube desde 272 (nuevos tests puros: cases/checks/baseline/harness/run). Suite `eval` (nueva) = manual contra docker+Ollama. `ruff`/`mypy` limpios.
 - **Invocación:** `cd backend && .venv/Scripts/python -m app.eval.run` (el path real es `app.eval.run`, NO `backend.eval.run` de CLAUDE.md §2 que era aspiracional).
-- **Fast-follows destapados** (fichar en la memoria, no bloquean): crecer el golden set con cada bug; casos de acción/escritura (checkpointer + resume); Ragas como reporte histórico (se cruza con Phoenix); persistir corridas a `agent_runs`/`eval_cases`; endurecer tolerancia + umbrales absolutos; si el juez intención↔SQL aprueba SELECT arbitrarios, la execution-accuracy lo expone (arreglo = otro slice).
-- **Gotcha nuevo:** `score_rag_cases` es SÍNCRONA (Ragas maneja su loop); el orquestador async la invoca con `asyncio.to_thread`. Un test async que la llame directo rompe con "event loop already running" → el smoke de Ragas es un test SYNC.
+- **Fast-follows destapados** (fichar en la memoria, no bloquean): crecer el golden set con cada bug; casos de acción/escritura (checkpointer + resume); Ragas como reporte histórico (se cruza con Phoenix); persistir corridas a `agent_runs`/`eval_cases`; endurecer tolerancia + umbrales absolutos; si el juez intención↔SQL aprueba SELECT arbitrarios, la execution-accuracy lo expone (arreglo = otro slice); si algún día se migra a langchain 1.x, evaluar la librería Ragas como reporte histórico (se cruza con Phoenix).
+- **Pivot Ragas→jueces propios (2026-07-02):** la librería Ragas es incompatible con el stack congelado de Fase 1 (0.2.x exige `langchain-core` 1.x; 0.1.x baja core a 0.2.43 + arrastra `openai`). Se miden las 4 métricas con jueces LLM locales (12b) reusando `rag/judges.py`; `score_rag_cases` es **async** (await directo, sin `to_thread`). Cero deps nuevas.

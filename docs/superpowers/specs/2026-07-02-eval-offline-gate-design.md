@@ -5,6 +5,18 @@
 - **Estado:** aprobado en brainstorming; pendiente de plan (writing-plans)
 - **Slice previo:** Slice 10 — canvas rico (`171bffd`, cierre Fase 1)
 
+> **Revisión (2026-07-02) — pivot de Ragas a jueces propios.** Durante la ejecución, la librería
+> **Ragas resultó incompatible con el stack congelado de Fase 1**: `ragas 0.2.x` exige
+> `langchain-core` 1.x y `ragas 0.1.x` baja `langchain-core` a 0.2.43 + arrastra `openai` — ambos
+> rompen `langchain-ollama 0.2` / `langgraph 0.2`. Decisión del usuario: **medir las 4 métricas
+> con jueces LLM LOCALES** (`gemma4:12b`, reusando `rag/judges.py` para faithfulness), **cero
+> dependencias nuevas**. Impacto: `ragas_metrics.py` → **`metrics.py`**; `RagasAggregates` →
+> **`MetricScores`**; `score_rag_cases` pasa a **async** (sin `to_thread`); se eliminan
+> `BgeM3Adapter`/`encode_sync`/el spike de versión. Las decisiones 2/4/5 y §4/§6.3/§8/§11.1 se
+> leen bajo este cambio; **la implementación autoritativa es el plan (Task 1)**. El resto del
+> diseño (ejecución end-to-end, aserciones deterministas, execution-accuracy, baseline-diff,
+> CLI+wrapper) queda igual.
+
 ## 1. Contexto y objetivo
 
 Fase 1 quedó cerrada: grafo+router, CRAG, NL2SQL read-only, 5 write-tools con HITL, memoria
@@ -28,9 +40,10 @@ manager / caching no regresionen retrieval o SQL (criterio de aceptación del bl
    usuario, corre router → subgrafo → jueces online; se captura el `AgentState` final y se
    puntúa sobre él. Cubre router + integración + citas (lo que §6 exige). Lento y
    no-determinista, pero es **gate manual pre-merge** (clase `-m llm`), no el loop rápido.
-2. **Motor de métricas: Ragas apuntado a Ollama** (no jueces caseros). LLM interno de Ragas =
-   `gemma4:12b`; embeddings = `bge-m3` local. Métricas: faithfulness, answer_relevancy,
-   context_precision, context_recall.
+2. **Motor de métricas: jueces LLM-as-judge LOCALES** (ver Revisión arriba — Ragas se descartó
+   por incompatibilidad de dependencias con el stack de Fase 1). LM = `gemma4:12b`; se reusa
+   `rag/judges.py` para faithfulness. Métricas: faithfulness, answer_relevancy,
+   context_precision, context_recall. **Cero dependencias nuevas.**
 3. **Semántica del gate: híbrida.** Aserciones deterministas por-caso = gate **duro** (bloquea
    siempre). Ragas agregado + execution-accuracy = gate de **regresión** (baseline-diff con
    tolerancia).
@@ -135,7 +148,7 @@ Campos: `question`, `category` ∈ {rag, sql}, `intent`, `expected_behavior` ∈
 | `cases.py` | `EvalCase` + loader/validador del JSONL. Puro. | — |
 | `harness.py` | Corre **un** caso end-to-end → `CaseResult`. | `graph.build.get_default_graph`, `graph.state.new_state`, `config.settings.practice_id` |
 | `checks.py` | Aserciones deterministas por-caso, incl. execution-accuracy. Puras sobre `CaseResult`. | `db.run_select` |
-| `ragas_metrics.py` | Wrappers Ragas (LLM 12b + `BgeM3Adapter`), dataset, `evaluate()` → agregados. | `llm.make_llm`, `embeddings` |
+| `metrics.py` | 4 métricas por juez LLM local (12b), reusa `judge_groundedness`; `score_rag_cases` async → agregados. | `llm.make_llm`, `rag.judges` |
 | `baseline.py` | load/save/diff de `baseline.json` con tolerancia. Puro. | — |
 | `run.py` | CLI: orquesta, imprime reporte, escribe `last_run.json`, exit code. Flags. | todo lo anterior |
 
@@ -188,24 +201,17 @@ Para el caso escalar (`count(*)`, 1×1) se reduce a comparar el único valor. Si
 está vacío/None (abstención SQL) → falla la aserción (correcto). La normalización por valores
 tolera que el candidato aliasee distinto la columna.
 
-### 6.3 `ragas_metrics.py` (adapter A1)
+### 6.3 `metrics.py` (jueces LLM locales — ver Revisión)
 
-```python
-class BgeM3Adapter(Embeddings):           # langchain_core.embeddings.Embeddings (sync)
-    def embed_documents(self, texts): return _shared_model().encode(texts).tolist()
-    def embed_query(self, text):      return _shared_model().encode([text])[0].tolist()
-```
+4 métricas por juez LLM LOCAL (`gemma4:12b`), **cero deps nuevas**:
+- **faithfulness** = `judge_groundedness(answer, contexts, llm=12b)` (REUSA `rag/judges.py`).
+- **answer_relevancy** / **context_precision** / **context_recall** = jueces booleanos
+  (`with_structured_output` con campo `bool` — patrón confiable en Gemma local) sobre
+  pregunta↔respuesta, pregunta↔contextos, y ground_truth↔contextos respectivamente.
+- `score_rag_cases(samples, llm=None)` es **async** (corre los jueces con `asyncio.gather`); el
+  score de cada métrica = promedio de los booleanos por caso.
 
-`_shared_model()` reusa el **mismo** `SentenceTransformer` bge-m3 singleton de
-`app/embeddings.py`. Hoy `embeddings.py` expone API async (`embed_query`/`embed_texts`); si el
-singleton no es accesible como sync, se agrega un accessor mínimo al singleton (**no** recarga
-el modelo). LLM de Ragas = `LangchainLLMWrapper(make_llm("gemma4:12b", 0.0))`.
-
-> **Nombres a confirmar en el spike (Tarea 1), NO inventar:** versión de `ragas`; paths de
-> import de las métricas; builder de dataset (`Dataset.from_list` vs `EvaluationDataset` /
-> `SingleTurnSample`); nombres de campos (`ground_truth` vs `reference`, `contexts` vs
-> `retrieved_contexts`, `question` vs `user_input`, `answer` vs `response`). El spec fija la
-> **intención**; el spike fija la **API exacta** contra la versión pineada.
+Código autoritativo en el plan (Task 1). Se eliminan `BgeM3Adapter`/`encode_sync`/Ragas.
 
 ### 6.4 `run.py` (CLI)
 
