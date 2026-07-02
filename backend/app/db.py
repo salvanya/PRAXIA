@@ -20,6 +20,14 @@ async def get_pool() -> asyncpg.Pool:
     return _pool
 
 
+async def close_pool() -> None:
+    """Cierra la pool asyncpg (para procesos one-shot como la CLI de eval)."""
+    global _pool
+    if _pool is not None:
+        await _pool.close()
+        _pool = None
+
+
 async def insert_document(
     practice_id: str,
     doc_type: str,
