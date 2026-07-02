@@ -15,6 +15,7 @@ from faker import Faker
 
 from app import db
 from app.config import get_settings
+from app.eval.fixtures import ensure_rag_fixture
 
 _NS = uuid.UUID("00000000-0000-0000-0000-0000000000aa")
 _APPT_STATUS = ["programado", "confirmado", "atendido", "ausente", "cancelado"]
@@ -100,10 +101,13 @@ async def seed_demo() -> dict[str, int]:
             rng.choice(["presencial", "telellamada"]),
         )
 
+    n_chunks = await ensure_rag_fixture()
+
     return {
         "practitioners": len(practitioners),
         "clients": len(clients),
         "appointments": len(starts),
+        "documents": n_chunks,
     }
 
 

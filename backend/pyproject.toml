@@ -16,6 +16,7 @@ markers = [
     "integration: requires running Postgres/Qdrant (deselect with -m 'not integration')",
     "llm: requires a running Ollama with the configured model",
     "pii: requires the spaCy model es_core_news_md + presidio (deselect with -m 'not pii')",
+    "eval: runs the full offline eval gate (needs Postgres/Qdrant + Ollama + seed demo)",
 ]
 filterwarnings = [
     # langchain_core._api.deprecation emits a LangChainPendingDeprecationWarning

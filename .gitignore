@@ -22,3 +22,6 @@ Thumbs.db
 
 # SDD scratch (briefs, reports, ledger)
 .superpowers/
+
+# Suite de eval: artefacto efímero de la última corrida (baseline.json SÍ se commitea)
+backend/app/eval/last_run.json
