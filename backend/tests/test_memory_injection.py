@@ -54,3 +54,28 @@ async def test_chitchat_no_memories_no_extra_system(monkeypatch) -> None:
     await _run(nodes.chitchat_node, new_state("hola", "p", "t"))  # memories=[] por new_state
     assert captured["messages"][0] == ("system", nodes.CHITCHAT_SYSTEM)
     assert sum(1 for m in captured["messages"] if m[0] == "system") == 1
+
+
+async def test_sql_synthesis_injects_memories(monkeypatch) -> None:
+    from app.agents import sql_present
+
+    captured = {}
+
+    class FakeResp:
+        content = "Tu profesional es la Dra. Gómez."
+
+    class FakeLLM:
+        async def ainvoke(self, messages):
+            captured["messages"] = messages
+            return FakeResp()
+
+    answer = await sql_present.synthesize_sql_answer(
+        "¿quién es mi profesional?",
+        [{"nombre": "Dra. Gómez"}],
+        ["nombre"],
+        llm=FakeLLM(),
+        memories=[{"content": "El profesional de la práctica es la Dra. Gómez.", "kind": "hecho"}],
+    )
+    system_texts = [m[1] for m in captured["messages"] if m[0] == "system"]
+    assert any("Dra. Gómez" in t for t in system_texts)
+    assert answer  # se devolvió una respuesta

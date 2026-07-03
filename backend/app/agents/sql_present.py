@@ -2,6 +2,7 @@ import re
 from typing import Any
 
 from app.config import get_settings
+from app.context import format_memories_block
 
 SQL_EMPTY_MESSAGE = "No encontré resultados para esa consulta."
 
@@ -55,13 +56,21 @@ def _deterministic(rows: list[dict], columns: list[str]) -> str:
 
 
 async def synthesize_sql_answer(
-    question: str, rows: list[dict], columns: list[str], llm: Any = None
+    question: str,
+    rows: list[dict],
+    columns: list[str],
+    llm: Any = None,
+    memories: list[dict] | None = None,
 ) -> str:
     if not rows:
         return SQL_EMPTY_MESSAGE
     llm = llm or _default_llm()
     table = render_rows_markdown(rows, columns)
-    messages = [("system", SYNTH_SYSTEM), ("human", f"Pregunta: {question}\n\nDatos:\n{table}")]
+    messages: list[tuple[str, str]] = [("system", SYNTH_SYSTEM)]
+    block = format_memories_block(memories or [])
+    if block:
+        messages.append(("system", block))
+    messages.append(("human", f"Pregunta: {question}\n\nDatos:\n{table}"))
     resp = await llm.ainvoke(messages)
     answer = (getattr(resp, "content", "") or "").strip()
     if not answer or not _grounded(answer, rows) or _has_md_table(answer):

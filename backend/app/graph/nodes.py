@@ -116,7 +116,9 @@ async def sql_node(state: AgentState) -> dict:
         write_sources([])
         answer = SQL_ABSTAIN_MESSAGE
     else:
-        answer = await synthesize_sql_answer(last_user_text(state), result.rows, result.columns)
+        answer = await synthesize_sql_answer(
+            last_user_text(state), result.rows, result.columns, memories=state.get("memories", [])
+        )
         for piece in _stream_chunks(answer):
             write_token(piece)
         is_tabular = bool(result.rows) and not (len(result.rows) == 1 and len(result.columns) == 1)
