@@ -35,8 +35,19 @@ class Settings(BaseSettings):
     pii_spacy_model: str = "es_core_news_md"
     pii_score_threshold: float = 0.5
 
+    # Memoria de largo plazo (Fase 2 Slice 2)
+    ollama_model_cheap: str = "gemma4:e4b"  # gate/extract de reflexión (consolida el literal e4b)
+    memory_recall_enabled: bool = True
+    memory_reflect_enabled: bool = True
+    memory_top_k: int = 5
+    memory_min_score: float = 0.5
+    memory_dedup_threshold: float = 0.9
+    memory_reflect_max_candidates: int = 3
+    memory_reflect_timeout_s: float = 10.0
+
     # Constants (not from env)
     qdrant_collection: ClassVar[str] = "praxia_chunks"
+    qdrant_memories_collection: ClassVar[str] = "praxia_memories"
     embed_dim: ClassVar[int] = 1024
 
 
