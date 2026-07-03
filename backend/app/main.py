@@ -27,6 +27,9 @@ SUPPORTED_SUFFIXES = (".pdf", ".md", ".markdown", ".txt")
 @asynccontextmanager
 async def lifespan(app_: FastAPI) -> AsyncIterator[None]:
     await vectorstore.ensure_collection()
+    from app.memory import long_term
+
+    await long_term.ensure_memories_collection()
     s = get_settings()
     # Import diferido: la recolección de tests (httpx ASGITransport) no corre el
     # lifespan, y así no exige psycopg/Postgres para importar el módulo.

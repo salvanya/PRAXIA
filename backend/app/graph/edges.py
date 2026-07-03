@@ -1,5 +1,3 @@
-from langgraph.graph import END
-
 from app.graph.state import AgentState
 
 _INTENT_TO_NODE = {
@@ -16,7 +14,7 @@ def route(state: AgentState) -> str:
 
 
 def route_after_propose(state: AgentState) -> str:
-    return "confirm_action" if state.get("proposed_action") else END
+    return "confirm_action" if state.get("proposed_action") else "reflect"
 
 
 def entry_route(state: AgentState) -> str:
