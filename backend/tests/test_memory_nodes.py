@@ -24,6 +24,27 @@ async def test_recall_node_best_effort_on_error(monkeypatch) -> None:
     assert out == {"memories": []}  # no rompe el turno
 
 
+async def test_recall_node_touch_failure_preserves_memories(monkeypatch) -> None:
+    async def _recall(query, practice_id):
+        return [
+            {
+                "id": "m2",
+                "content": "Paciente prefiere turno mañana.",
+                "kind": "hecho",
+                "scope": "practice",
+            }
+        ]
+
+    async def _touch_boom(ids):
+        raise RuntimeError("pg down")
+
+    monkeypatch.setattr(memory_nodes.long_term, "recall", _recall)
+    monkeypatch.setattr(memory_nodes.long_term, "touch_last_used", _touch_boom)
+    out = await memory_nodes.recall_node(new_state("turno preferido", "p", "t"))
+    # touch falló pero el recall fue exitoso — las memorias NO deben perderse
+    assert out["memories"][0]["content"] == "Paciente prefiere turno mañana."
+
+
 async def test_recall_node_disabled(monkeypatch) -> None:
     from app.config import Settings
 
