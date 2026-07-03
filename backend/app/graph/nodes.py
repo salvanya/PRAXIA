@@ -55,7 +55,11 @@ def _stream_chunks(text: str, size: int = 24) -> list[str]:
 
 
 async def rag_node(state: AgentState) -> dict:
-    result = await crag_app.ainvoke(initial_rag_state(last_user_text(state), state["practice_id"]))
+    result = await crag_app.ainvoke(
+        initial_rag_state(
+            last_user_text(state), state["practice_id"], memories=state.get("memories", [])
+        )
+    )
     answer = result["answer"]
     if result["abstained"]:
         write_token(answer)

@@ -79,3 +79,36 @@ async def test_sql_synthesis_injects_memories(monkeypatch) -> None:
     system_texts = [m[1] for m in captured["messages"] if m[0] == "system"]
     assert any("Dra. Gómez" in t for t in system_texts)
     assert answer  # se devolvió una respuesta
+
+
+async def test_rag_synthesis_injects_memories(monkeypatch) -> None:
+    from app.models import Chunk
+    from app.rag import synthesize as synth_mod
+
+    captured = {}
+
+    class FakeMsg:
+        def __init__(self, content):
+            self.content = content
+
+    class FakeLLM:
+        async def astream(self, messages):
+            captured["messages"] = messages
+            yield FakeMsg("Según el protocolo [1].")
+
+    chunk = Chunk(
+        text="La primera consulta dura 60 minutos.",
+        page=1,
+        chunk_index=0,
+        document_id="d1",
+        title="Protocolo",
+        doc_type="protocolo",
+    )
+    await synth_mod.synthesize(
+        "¿cuánto dura?",
+        [chunk],
+        llm=FakeLLM(),
+        memories=[{"content": "Se dice 'pacientes', no 'clientes'.", "kind": "preferencia"}],
+    )
+    system_texts = [m[1] for m in captured["messages"] if m[0] == "system"]
+    assert any("pacientes" in t for t in system_texts)

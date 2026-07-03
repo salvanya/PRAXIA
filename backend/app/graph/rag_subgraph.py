@@ -25,9 +25,10 @@ class RagState(TypedDict):
     grounded: bool  # veredicto del juez de groundedness
     abstained: bool  # True si terminó en abstención
     sources: list[dict]  # build_sources(reranked) — solo se llena en éxito
+    memories: list[dict]  # memorias practice-scope inyectadas en la síntesis
 
 
-def initial_rag_state(query: str, practice_id: str) -> RagState:
+def initial_rag_state(query: str, practice_id: str, memories: list[dict] | None = None) -> RagState:
     return {
         "original_query": query,
         "query": query,
@@ -39,6 +40,7 @@ def initial_rag_state(query: str, practice_id: str) -> RagState:
         "grounded": False,
         "abstained": False,
         "sources": [],
+        "memories": memories or [],
     }
 
 
@@ -76,7 +78,9 @@ async def reformulate_node(state: RagState) -> dict[str, Any]:
 
 
 async def synthesize_node(state: RagState) -> dict[str, Any]:
-    answer = await synthesize(state["original_query"], state["reranked"])
+    answer = await synthesize(
+        state["original_query"], state["reranked"], memories=state.get("memories", [])
+    )
     return {"answer": answer}
 
 

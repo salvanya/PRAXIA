@@ -29,7 +29,7 @@ async def _ok_rerank(query, chunks):
 
 
 async def test_sufficient_first_try_returns_grounded_answer(monkeypatch):
-    async def synth(q, chunks):
+    async def synth(q, chunks, **kwargs):
         return "La consulta dura 60 min [1]."
 
     async def jr(q, chunks, llm=None):
@@ -59,7 +59,7 @@ async def test_insufficient_then_reformulate_then_sufficient(monkeypatch):
         calls["r"] += 1
         return judges.RelevanceVerdict(sufficient=calls["r"] >= 2, reason="x")
 
-    async def synth(q, chunks):
+    async def synth(q, chunks, **kwargs):
         return "ok [1]."
 
     async def jg(a, chunks, llm=None):
@@ -108,7 +108,7 @@ async def test_insufficient_twice_abstains_without_sources(monkeypatch):
 
 
 async def test_ungrounded_answer_abstains_without_sources(monkeypatch):
-    async def synth(q, chunks):
+    async def synth(q, chunks, **kwargs):
         return "La consulta dura 90 min [1]."
 
     async def jr(q, chunks, llm=None):
@@ -134,7 +134,7 @@ async def test_ungrounded_answer_abstains_without_sources(monkeypatch):
 async def test_synth_self_abstain_skips_groundedness(monkeypatch):
     ground = {"called": False}
 
-    async def synth(q, chunks):
+    async def synth(q, chunks, **kwargs):
         return ABSTAIN_MESSAGE
 
     async def jr(q, chunks, llm=None):
@@ -186,7 +186,7 @@ async def test_groundedness_judge_failure_is_fail_closed(monkeypatch):
     """Fail-closed: si el juez de groundedness explota, se trata como NO fundamentado
     → abstención sin fuentes (no se filtra la respuesta sin verificar)."""
 
-    async def synth(q, chunks):
+    async def synth(q, chunks, **kwargs):
         return "La consulta dura 60 min [1]."
 
     async def jr(q, chunks, llm=None):
@@ -240,7 +240,7 @@ async def test_empty_synthesis_abstains_without_sources(monkeypatch):
     """Si la síntesis sale vacía, se auto-abstiene SIN llamar a groundedness ni emitir fuentes."""
     ground = {"called": False}
 
-    async def synth(q, chunks):
+    async def synth(q, chunks, **kwargs):
         return "   "
 
     async def jr(q, chunks, llm=None):

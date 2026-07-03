@@ -2,6 +2,7 @@ from collections.abc import AsyncIterator
 from typing import Any
 
 from app.config import get_settings
+from app.context import format_memories_block
 from app.models import Chunk
 
 ABSTAIN_MESSAGE = "No encuentro esa información en los documentos disponibles."
@@ -56,22 +57,29 @@ def _default_llm() -> Any:
     return make_llm(get_settings().ollama_model, temperature=0.1)
 
 
-async def synthesize_stream(query: str, chunks: list[Chunk], llm: Any = None) -> AsyncIterator[str]:
+async def synthesize_stream(
+    query: str, chunks: list[Chunk], llm: Any = None, memories: list[dict] | None = None
+) -> AsyncIterator[str]:
     if not chunks:
         yield ABSTAIN_MESSAGE
         return
     llm = llm or _default_llm()
-    messages = [
-        ("system", SYSTEM_PROMPT),
-        ("human", f"Fragmentos:\n\n{_format_context(chunks)}\n\nPregunta: {query}"),
-    ]
+    messages: list[tuple[str, str]] = [("system", SYSTEM_PROMPT)]
+    block = format_memories_block(memories or [])
+    if block:
+        messages.append(("system", block))
+    messages.append(("human", f"Fragmentos:\n\n{_format_context(chunks)}\n\nPregunta: {query}"))
     async for piece in llm.astream(messages):
         text = getattr(piece, "content", "")
         if text:
             yield text
 
 
-async def synthesize(query: str, chunks: list[Chunk], llm: Any = None) -> str:
+async def synthesize(
+    query: str, chunks: list[Chunk], llm: Any = None, memories: list[dict] | None = None
+) -> str:
     """Variante buffered: colecta synthesize_stream a un string. Necesaria para
     buffer-then-stream — la respuesta se verifica (groundedness) antes de emitirse."""
-    return "".join([piece async for piece in synthesize_stream(query, chunks, llm=llm)])
+    return "".join(
+        [piece async for piece in synthesize_stream(query, chunks, llm=llm, memories=memories)]
+    )
