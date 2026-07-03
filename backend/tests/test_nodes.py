@@ -71,7 +71,7 @@ async def test_sql_node_emits_synthesized_answer(monkeypatch):
     async def _fake_answer(question, practice_id, **kw):
         return SqlResult(sql="SELECT 1", rows=[{"total": 12}], columns=["total"])
 
-    async def _fake_synth(question, rows, columns, llm=None):
+    async def _fake_synth(question, rows, columns, llm=None, memories=None):
         return "Tenés 12 turnos esta semana."
 
     monkeypatch.setattr(nodes, "answer_structured", _fake_answer)
@@ -486,7 +486,7 @@ async def test_sql_node_emits_table_for_tabular_result(monkeypatch):
             columns=["full_name"],
         )
 
-    async def _fake_synth(question, rows, columns, llm=None):
+    async def _fake_synth(question, rows, columns, llm=None, memories=None):
         return "Encontré 2 resultado(s)."
 
     monkeypatch.setattr(nodes, "answer_structured", _fake_answer)
@@ -504,7 +504,7 @@ async def test_sql_node_no_table_for_scalar(monkeypatch):
     async def _fake_answer(question, practice_id, **kw):
         return SqlResult(sql="SELECT count(*)", rows=[{"total": 12}], columns=["total"])
 
-    async def _fake_synth(question, rows, columns, llm=None):
+    async def _fake_synth(question, rows, columns, llm=None, memories=None):
         return "Tenés 12 turnos."
 
     monkeypatch.setattr(nodes, "answer_structured", _fake_answer)
@@ -531,7 +531,7 @@ async def test_sql_node_no_table_for_empty(monkeypatch):
     async def _fake_answer(question, practice_id, **kw):
         return SqlResult(sql="SELECT full_name FROM clients WHERE 1=0", rows=[], columns=[])
 
-    async def _fake_synth(question, rows, columns, llm=None):
+    async def _fake_synth(question, rows, columns, llm=None, memories=None):
         return SQL_EMPTY_MESSAGE
 
     monkeypatch.setattr(nodes, "answer_structured", _fake_answer)

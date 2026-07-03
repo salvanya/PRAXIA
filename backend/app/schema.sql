@@ -99,3 +99,19 @@ CREATE TABLE IF NOT EXISTS interactions (
     created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS idx_interactions_client ON interactions(client_id, occurred_at DESC);
+
+-- ====== Memoria de largo plazo (semántica/episódica) — Fase 2 Slice 2 ======
+CREATE TABLE IF NOT EXISTS memories (
+    id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    practice_id  UUID NOT NULL REFERENCES practices(id) ON DELETE CASCADE,
+    scope        TEXT NOT NULL DEFAULT 'practice' CHECK (scope IN ('practice','client','user')),
+    client_id    UUID REFERENCES clients(id),          -- null en este slice
+    user_id      UUID REFERENCES users(id),            -- null en este slice
+    kind         TEXT NOT NULL CHECK (kind IN ('preferencia','hecho','episodica')),
+    content      TEXT NOT NULL,
+    source       TEXT NOT NULL DEFAULT 'reflexion' CHECK (source IN ('reflexion','explicito')),
+    salience     REAL NOT NULL DEFAULT 0.5,
+    created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+    last_used_at TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS idx_memories_practice ON memories(practice_id, scope);

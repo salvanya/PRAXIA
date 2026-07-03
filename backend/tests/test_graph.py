@@ -38,7 +38,7 @@ async def test_graph_routes_sql_to_node(monkeypatch):
     async def _fake_answer(question, practice_id, **kw):
         return SqlResult(sql="SELECT 1", rows=[{"total": 3}], columns=["total"])
 
-    async def _fake_synth(question, rows, columns, llm=None):
+    async def _fake_synth(question, rows, columns, llm=None, memories=None):
         return "Tenés 3 turnos."
 
     monkeypatch.setattr(nodes, "answer_structured", _fake_answer)

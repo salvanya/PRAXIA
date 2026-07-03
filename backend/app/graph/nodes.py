@@ -11,6 +11,7 @@ from app.agents.sql_agent import answer_structured
 from app.agents.sql_present import synthesize_sql_answer
 from app.agents.write_tools import REGISTRY, classify_write_action
 from app.config import get_settings
+from app.context import format_memories_block
 from app.graph.rag_subgraph import crag_app, initial_rag_state
 from app.graph.state import AgentState, last_user_text
 
@@ -54,7 +55,11 @@ def _stream_chunks(text: str, size: int = 24) -> list[str]:
 
 
 async def rag_node(state: AgentState) -> dict:
-    result = await crag_app.ainvoke(initial_rag_state(last_user_text(state), state["practice_id"]))
+    result = await crag_app.ainvoke(
+        initial_rag_state(
+            last_user_text(state), state["practice_id"], memories=state.get("memories", [])
+        )
+    )
     answer = result["answer"]
     if result["abstained"]:
         write_token(answer)
@@ -89,7 +94,9 @@ def _history_messages(state: AgentState, window: int) -> list[tuple[str, str]]:
 async def chitchat_node(state: AgentState) -> dict:
     llm = _chitchat_llm()
     window = get_settings().short_term_history_window
-    messages = [("system", CHITCHAT_SYSTEM), *_history_messages(state, window)]
+    block = format_memories_block(state.get("memories", []))
+    mem = [("system", block)] if block else []
+    messages = [("system", CHITCHAT_SYSTEM), *mem, *_history_messages(state, window)]
     full = ""
     async for piece in llm.astream(messages):
         text = getattr(piece, "content", "")
@@ -113,7 +120,9 @@ async def sql_node(state: AgentState) -> dict:
         write_sources([])
         answer = SQL_ABSTAIN_MESSAGE
     else:
-        answer = await synthesize_sql_answer(last_user_text(state), result.rows, result.columns)
+        answer = await synthesize_sql_answer(
+            last_user_text(state), result.rows, result.columns, memories=state.get("memories", [])
+        )
         for piece in _stream_chunks(answer):
             write_token(piece)
         is_tabular = bool(result.rows) and not (len(result.rows) == 1 and len(result.columns) == 1)
