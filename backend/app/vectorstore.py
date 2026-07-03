@@ -15,6 +15,11 @@ def _get_client() -> AsyncQdrantClient:
     return _client
 
 
+def get_client() -> AsyncQdrantClient:
+    """Cliente Qdrant compartido (reusado por memoria de largo plazo)."""
+    return _get_client()
+
+
 async def ensure_collection() -> None:
     s = get_settings()
     client = _get_client()
