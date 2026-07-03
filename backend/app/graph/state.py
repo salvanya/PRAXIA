@@ -24,6 +24,7 @@ class AgentState(TypedDict):
     judge_scores: dict
     proposed_action: dict | None
     pending_clarification: dict | None
+    memories: list[dict]
 
 
 def new_state(message: str, practice_id: str, thread_id: str) -> AgentState:
@@ -38,6 +39,7 @@ def new_state(message: str, practice_id: str, thread_id: str) -> AgentState:
         "judge_scores": {},
         "proposed_action": None,
         "pending_clarification": None,
+        "memories": [],
     }
 
 
