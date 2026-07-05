@@ -45,6 +45,14 @@ class Settings(BaseSettings):
     memory_reflect_max_candidates: int = 3
     memory_reflect_timeout_s: float = 10.0
 
+    # Context Manager (Fase 2 Slice 3)
+    context_token_budget: int = (
+        3000  # tokens aprox del ensamblado de chitchat (holgado bajo num_ctx)
+    )
+    summary_enabled: bool = True
+    summary_timeout_s: float = 8.0  # <= memory_reflect_timeout_s (ventana concurrente)
+    summary_max_words: int = 150
+
     # Constants (not from env)
     qdrant_collection: ClassVar[str] = "praxia_chunks"
     qdrant_memories_collection: ClassVar[str] = "praxia_memories"
