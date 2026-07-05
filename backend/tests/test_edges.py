@@ -12,10 +12,10 @@ def test_route_after_propose_to_confirm_when_action_present() -> None:
     assert route_after_propose(state) == "confirm_action"
 
 
-def test_route_after_propose_to_reflect_when_abstained() -> None:
+def test_route_after_propose_to_consolidate_when_abstained() -> None:
     state = new_state("x", "p", "t")
     state["proposed_action"] = None
-    assert route_after_propose(state) == "reflect"
+    assert route_after_propose(state) == "consolidate"
 
 
 def test_entry_route_to_clarify_when_pending() -> None:

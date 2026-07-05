@@ -4,7 +4,7 @@ from typing import Any
 from langgraph.graph import END, START, StateGraph
 
 from app.graph.edges import entry_route, route, route_after_propose
-from app.graph.memory_nodes import recall_node, reflect_node
+from app.graph.memory_nodes import consolidate_node, recall_node
 from app.graph.nodes import (
     chitchat_node,
     clarify_node,
@@ -17,7 +17,7 @@ from app.graph.nodes import (
 from app.graph.router import router_node
 from app.graph.state import AgentState
 
-# terminales de CONTENIDO → pasan por reflect. scope_reject → END directo (nada que recordar).
+# terminales de CONTENIDO → pasan por consolidate. scope_reject → END directo (nada que recordar).
 _CONTENT_LEAVES = ("rag", "chitchat", "sql_node", "confirm_action")
 
 
@@ -32,7 +32,7 @@ def build_graph(checkpointer: Any = None) -> Any:
     g.add_node("propose_action", propose_action_node)
     g.add_node("confirm_action", confirm_action_node)
     g.add_node("clarify", clarify_node)
-    g.add_node("reflect", reflect_node)
+    g.add_node("consolidate", consolidate_node)
 
     g.add_conditional_edges(START, entry_route, {"clarify": "clarify", "router": "router"})
     g.add_edge("router", "recall")
@@ -50,15 +50,17 @@ def build_graph(checkpointer: Any = None) -> Any:
     g.add_conditional_edges(
         "propose_action",
         route_after_propose,
-        {"confirm_action": "confirm_action", "reflect": "reflect"},
+        {"confirm_action": "confirm_action", "consolidate": "consolidate"},
     )
     g.add_conditional_edges(
-        "clarify", route_after_propose, {"confirm_action": "confirm_action", "reflect": "reflect"}
+        "clarify",
+        route_after_propose,
+        {"confirm_action": "confirm_action", "consolidate": "consolidate"},
     )
     for node in _CONTENT_LEAVES:
-        g.add_edge(node, "reflect")
+        g.add_edge(node, "consolidate")
     g.add_edge("scope_reject", END)
-    g.add_edge("reflect", END)
+    g.add_edge("consolidate", END)
 
     return g.compile(checkpointer=checkpointer)
 
