@@ -10,8 +10,8 @@ class AgentState(TypedDict):
     """State tipado y mínimo del grafo (CLAUDE.md §4).
 
     Campos declarados para slices posteriores (plan, candidate_sql,
-    proposed_action, judge_scores, memories, running_summary) se agregarán
-    cuando su slice los escriba; se mantiene el state chico a propósito.
+    proposed_action, judge_scores) se agregarán cuando su slice los escriba;
+    se mantiene el state chico a propósito.
     """
 
     messages: Annotated[list, add_messages]
@@ -25,6 +25,8 @@ class AgentState(TypedDict):
     proposed_action: dict | None
     pending_clarification: dict | None
     memories: list[dict]
+    running_summary: str
+    summarized_count: int
 
 
 def new_state(message: str, practice_id: str, thread_id: str) -> AgentState:
@@ -40,6 +42,8 @@ def new_state(message: str, practice_id: str, thread_id: str) -> AgentState:
         "proposed_action": None,
         "pending_clarification": None,
         "memories": [],
+        "running_summary": "",
+        "summarized_count": 0,
     }
 
 

@@ -296,6 +296,28 @@ async def test_chitchat_window_zero_sends_no_history(monkeypatch):
     ], f"window=0 no debe incluir historial, pero se recibió: {captured['messages']}"
 
 
+async def test_chitchat_includes_running_summary(monkeypatch):
+    captured = {}
+
+    class FakeMsg:
+        def __init__(self, content):
+            self.content = content
+
+    class FakeLLM:
+        async def astream(self, messages):
+            captured["messages"] = messages
+            yield FakeMsg("ok")
+
+    monkeypatch.setattr(nodes, "_chitchat_llm", lambda: FakeLLM())
+    state = new_state("¿cómo me llamo?", "p", "t")
+    state["running_summary"] = "La usuaria se llama Ana."
+    await _run(nodes.chitchat_node, state)
+    assert captured["messages"][0] == ("system", nodes.CHITCHAT_SYSTEM)
+    assert any(role == "system" and "Ana" in text for role, text in captured["messages"]), captured[
+        "messages"
+    ]
+
+
 async def test_propose_action_clarification_sets_pending(monkeypatch):
     from app.agents import write_tools
     from app.agents.action_agent import Clarification, ProposalResult

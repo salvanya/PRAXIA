@@ -1,11 +1,12 @@
+import asyncio
 import logging
 from typing import Any
 
-from langchain_core.messages import AIMessage
+from langchain_core.messages import AIMessage, HumanMessage
 
 from app.config import get_settings
 from app.graph.state import AgentState, last_user_text
-from app.memory import long_term, reflect
+from app.memory import long_term, reflect, summarize
 
 logger = logging.getLogger(__name__)
 
@@ -16,6 +17,15 @@ def _last_ai_text(messages: list[Any]) -> str:
             content = msg.content
             return content if isinstance(content, str) else str(content)
     return ""
+
+
+def _to_role_text(messages: list[Any]) -> list[tuple[str, str]]:
+    out: list[tuple[str, str]] = []
+    for m in messages:
+        text = getattr(m, "content", "")
+        if isinstance(text, str) and text:
+            out.append(("human" if isinstance(m, HumanMessage) else "ai", text))
+    return out
 
 
 async def recall_node(state: AgentState) -> dict:
@@ -31,17 +41,58 @@ async def recall_node(state: AgentState) -> dict:
     if memories:
         try:
             await long_term.touch_last_used([m["id"] for m in memories])
-        except Exception:  # noqa: BLE001 - touch es side-effect no esencial; no debe borrar el recall
+        except Exception:  # noqa: BLE001 - touch es side-effect no esencial
             logger.warning("recall_node: touch_last_used falló (best-effort)", exc_info=True)
     return {"memories": memories}
 
 
-async def reflect_node(state: AgentState) -> dict:
-    """Reflexiona sobre el turno (gate → extract → store). No toca messages. Best-effort."""
+async def _reflect_delta(state: AgentState) -> dict:
+    """Memoria de largo plazo (gate → extract → store). Best-effort; no aporta delta de state."""
     try:
         await reflect.run(
             state["practice_id"], last_user_text(state), _last_ai_text(state["messages"])
         )
     except Exception:  # noqa: BLE001 - best-effort (reflect.run ya es best-effort; doble guarda)
-        logger.warning("reflect_node best-effort falló", exc_info=True)
+        logger.warning("consolidate: reflect best-effort falló", exc_info=True)
     return {}
+
+
+async def _summary_delta(state: AgentState) -> dict:
+    """Update incremental del running_summary. Solo con desalojo; best-effort + time-boxed.
+    Plega a lo sumo summary_max_fold_messages por turno (acota el costo; catch-up en chunks)."""
+    s = get_settings()
+    if not s.summary_enabled:
+        return {}
+    msgs = state["messages"]
+    evict_upto = len(msgs) - s.short_term_history_window
+    already = state.get("summarized_count", 0)
+    if evict_upto <= already:
+        return {}
+    fold_to = min(evict_upto, already + s.summary_max_fold_messages)
+    newly = _to_role_text(msgs[already:fold_to])
+    if not newly:
+        return {}
+    try:
+        new_summary = await asyncio.wait_for(
+            summarize.run(state.get("running_summary", ""), newly), timeout=s.summary_timeout_s
+        )
+    except Exception:  # noqa: BLE001 - best-effort: timeout/fallo conserva el summary previo
+        logger.warning("consolidate: summary best-effort falló", exc_info=True)
+        return {}
+    if not new_summary:
+        logger.warning("consolidate: summary sin salida de e4b tras retries; se conserva el previo")
+        return {}
+    return {"running_summary": new_summary, "summarized_count": fold_to}
+
+
+async def consolidate_node(state: AgentState) -> dict:
+    """Cierre de turno: memoria LP (reflect) + running_summary, CONCURRENTES y best-effort.
+    Ninguna de las dos ramas puede romper el turno; solo el summary aporta delta de state."""
+    deltas = await asyncio.gather(
+        _reflect_delta(state), _summary_delta(state), return_exceptions=True
+    )
+    merged: dict = {}
+    for d in deltas:
+        if isinstance(d, dict):
+            merged.update(d)
+    return merged

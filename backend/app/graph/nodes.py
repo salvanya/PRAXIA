@@ -11,7 +11,7 @@ from app.agents.sql_agent import answer_structured
 from app.agents.sql_present import synthesize_sql_answer
 from app.agents.write_tools import REGISTRY, classify_write_action
 from app.config import get_settings
-from app.context import format_memories_block
+from app.context import build_chat_messages
 from app.graph.rag_subgraph import crag_app, initial_rag_state
 from app.graph.state import AgentState, last_user_text
 
@@ -93,10 +93,14 @@ def _history_messages(state: AgentState, window: int) -> list[tuple[str, str]]:
 
 async def chitchat_node(state: AgentState) -> dict:
     llm = _chitchat_llm()
-    window = get_settings().short_term_history_window
-    block = format_memories_block(state.get("memories", []))
-    mem = [("system", block)] if block else []
-    messages = [("system", CHITCHAT_SYSTEM), *mem, *_history_messages(state, window)]
+    s = get_settings()
+    messages = build_chat_messages(
+        system=CHITCHAT_SYSTEM,
+        summary=state.get("running_summary", ""),
+        memories=state.get("memories", []),
+        history=_history_messages(state, s.short_term_history_window),
+        budget=s.context_token_budget,
+    )
     full = ""
     async for piece in llm.astream(messages):
         text = getattr(piece, "content", "")

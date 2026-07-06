@@ -14,7 +14,7 @@ def route(state: AgentState) -> str:
 
 
 def route_after_propose(state: AgentState) -> str:
-    return "confirm_action" if state.get("proposed_action") else "reflect"
+    return "confirm_action" if state.get("proposed_action") else "consolidate"
 
 
 def entry_route(state: AgentState) -> str:
