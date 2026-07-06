@@ -140,3 +140,32 @@ async def test_consolidate_summary_best_effort_on_error(monkeypatch) -> None:
     state["messages"] = [HumanMessage(content=f"m{i}") for i in range(6)]
     out = await memory_nodes.consolidate_node(state)
     assert out == {}  # el summary falló pero el turno no se rompe
+
+
+async def test_consolidate_caps_fold_band(monkeypatch) -> None:
+    from langchain_core.messages import HumanMessage
+
+    from app.config import Settings
+
+    captured = {}
+
+    async def _noop_reflect(*a, **k):
+        return None
+
+    async def _fake_summary(old_summary, new_messages, *, llm=None):
+        captured["n"] = len(new_messages)
+        return "RESUMEN"
+
+    monkeypatch.setattr(memory_nodes.reflect, "run", _noop_reflect)
+    monkeypatch.setattr(memory_nodes.summarize, "run", _fake_summary)
+    monkeypatch.setattr(
+        memory_nodes,
+        "get_settings",
+        lambda: Settings(short_term_history_window=2, summary_max_fold_messages=3),
+    )
+    state = new_state("m0", "p", "t")
+    state["messages"] = [HumanMessage(content=f"m{i}") for i in range(10)]  # evict_upto = 10-2 = 8
+    out = await memory_nodes.consolidate_node(state)
+    # capped to 3 (already=0 → fold_to=min(8,0+3)=3); pointer advances to 3, not 8
+    assert captured["n"] == 3
+    assert out == {"running_summary": "RESUMEN", "summarized_count": 3}

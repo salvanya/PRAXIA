@@ -58,7 +58,8 @@ async def _reflect_delta(state: AgentState) -> dict:
 
 
 async def _summary_delta(state: AgentState) -> dict:
-    """Update incremental del running_summary. Solo con desalojo; best-effort + time-boxed."""
+    """Update incremental del running_summary. Solo con desalojo; best-effort + time-boxed.
+    Plega a lo sumo summary_max_fold_messages por turno (acota el costo; catch-up en chunks)."""
     s = get_settings()
     if not s.summary_enabled:
         return {}
@@ -67,7 +68,8 @@ async def _summary_delta(state: AgentState) -> dict:
     already = state.get("summarized_count", 0)
     if evict_upto <= already:
         return {}
-    newly = _to_role_text(msgs[already:evict_upto])
+    fold_to = min(evict_upto, already + s.summary_max_fold_messages)
+    newly = _to_role_text(msgs[already:fold_to])
     if not newly:
         return {}
     try:
@@ -78,8 +80,9 @@ async def _summary_delta(state: AgentState) -> dict:
         logger.warning("consolidate: summary best-effort falló", exc_info=True)
         return {}
     if not new_summary:
+        logger.warning("consolidate: summary sin salida de e4b tras retries; se conserva el previo")
         return {}
-    return {"running_summary": new_summary, "summarized_count": evict_upto}
+    return {"running_summary": new_summary, "summarized_count": fold_to}
 
 
 async def consolidate_node(state: AgentState) -> dict:

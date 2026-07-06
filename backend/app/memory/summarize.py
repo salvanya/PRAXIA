@@ -54,6 +54,7 @@ async def run(
             resp = await llm.ainvoke(messages)
             text = (getattr(resp, "content", "") or "").strip()
         except Exception:  # noqa: BLE001 - cualquier fallo cuenta como intento
+            logger.debug("summarize: intento de ainvoke falló", exc_info=True)
             text = ""
         if text:
             return _cap(text, s.summary_max_words)

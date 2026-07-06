@@ -52,6 +52,9 @@ class Settings(BaseSettings):
     summary_enabled: bool = True
     summary_timeout_s: float = 8.0  # <= memory_reflect_timeout_s (ventana concurrente)
     summary_max_words: int = 150
+    summary_max_fold_messages: int = (
+        20  # cap de mensajes plegados por turno (acota el costo bajo falla sostenida)
+    )
 
     # Constants (not from env)
     qdrant_collection: ClassVar[str] = "praxia_chunks"
