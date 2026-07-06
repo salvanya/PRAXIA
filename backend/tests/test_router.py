@@ -33,7 +33,11 @@ async def test_router_node_sets_intent_from_last_human():
 
 
 def test_intents_tuple_is_the_contract():
-    assert router.INTENTS == ("rag", "sql", "action", "chitchat", "out_of_scope")
+    assert router.INTENTS == ("rag", "sql", "action", "chitchat", "memoria", "out_of_scope")
+
+
+async def test_classify_intent_accepts_memoria():
+    assert await router.classify_intent("olvidá eso", llm=FakeRouterLLM("memoria")) == "memoria"
 
 
 @pytest.mark.llm

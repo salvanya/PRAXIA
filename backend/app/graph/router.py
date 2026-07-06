@@ -2,7 +2,7 @@ from typing import Any
 
 from app.graph.state import AgentState, last_user_text
 
-INTENTS: tuple[str, ...] = ("rag", "sql", "action", "chitchat", "out_of_scope")
+INTENTS: tuple[str, ...] = ("rag", "sql", "action", "chitchat", "memoria", "out_of_scope")
 
 ROUTER_PROMPT = (
     "Sos el router de un CRM conversacional para prácticas profesionales (clínicas, "
@@ -17,6 +17,9 @@ ROUTER_PROMPT = (
     '"marcá a Juan como inactivo".\n'
     "- chitchat: saludo, charla trivial o pregunta sobre lo conversado antes. "
     'Ej: "hola", "gracias", "¿cómo estás?", "¿qué te dije?", "¿lo recordás?".\n'
+    "- memoria: el usuario pide OLVIDAR o CORREGIR algo que Praxia recuerda de la práctica. "
+    'Ej: "olvidá que los turnos duran 30 min", "ya no atendemos sábados", '
+    '"corregí que la primera consulta dura 45 minutos".\n'
     "- out_of_scope: fuera del dominio de la práctica (cocina, política, código, etc.). "
     'Ej: "¿cuál es la capital de Francia?", "escribime un poema".\n'
     "Respondé solo con la intención."

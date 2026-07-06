@@ -6,6 +6,12 @@ def test_action_intent_routes_to_propose() -> None:
     assert _INTENT_TO_NODE["action"] == "propose_action"
 
 
+def test_memoria_intent_routes_to_memory_command() -> None:
+    from app.graph.edges import _INTENT_TO_NODE
+
+    assert _INTENT_TO_NODE["memoria"] == "memory_command"
+
+
 def test_route_after_propose_to_confirm_when_action_present() -> None:
     state = new_state("x", "p", "t")
     state["proposed_action"] = {"kind": "create_appointment"}

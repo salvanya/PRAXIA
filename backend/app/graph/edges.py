@@ -5,6 +5,7 @@ _INTENT_TO_NODE = {
     "sql": "sql_node",
     "action": "propose_action",
     "chitchat": "chitchat",
+    "memoria": "memory_command",
     "out_of_scope": "scope_reject",
 }
 
