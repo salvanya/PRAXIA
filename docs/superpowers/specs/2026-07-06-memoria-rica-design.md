@@ -51,7 +51,7 @@ Consecuencia (bug destapado en el smoke del Slice 12/13): dos hechos **contradic
 | Semántica de borrado | **Hard delete** (`supersede`=borrar viejo+insertar nuevo; `forget`=borrar) | YAGNI: cero DDL, recall intacto. La memoria es **regenerable** (reflect la reaprende). `interactions`/`agent_runs` ya auditan a nivel acción; la memoria no es dato CRM/PII. |
 | Comando de usuario | **Inline con eco**, sin ConfirmCard | La memoria es **estado del asistente**, no dato CRM; la HITL de CLAUDE.md §4 es para writes CRM con tools parametrizadas. El usuario ya pide el borrado explícitamente → confirmar sería fricción redundante. Cero frontend nuevo. |
 | Routing de B | **6ta intención `memory_command`** en el router + **node self-verify → chitchat** | El router es el punto de control de entrada (CLAUDE.md §4: no esquivarlo). El fallback del nodo neutraliza la fragilidad del router e4b: una mala clasificación **nunca borra**. |
-| Detección de A | **Juez e4b** sobre **banda `[memory_contradiction_low=0.6, memory_dedup_threshold=0.9)`**, **sesgo a False** | Precisión > recall: un supersede borra una memoria buena si el juez se equivoca. La banda evita comparar el candidato contra todo el corpus (arriba de 0.9 ya es dedup; abajo de 0.6 es otro tema). |
+| Detección de A | **Juez e4b 3-vías** (`duplicate`/`supersede`/`distinct`) sobre **todos los vecinos ≥ `memory_contradiction_low=0.6`** (SIN techo 0.9), **sesgo a `distinct`** | El coseno no separa "mismo hecho reformulado" de "mismo sujeto, valor cambiado" (30→45 min puede dar ≥0.9) → un techo 0.9 **enmascararía** la contradicción como duplicado. El juez decide dedup vs supersede vs coexistir. Precisión > recall (sesgo a `distinct`: un supersede borra dato bueno si falla). El piso 0.6 + cap de candidatos acota el costo. |
 | Cierre de turno de B | **`memory_command → END`** (salta `consolidate`) | Evita el **loop de re-aprendizaje**: si pasara por `consolidate`, `reflect` re-guardaría en el mismo turno justo lo que se acaba de olvidar. El `running_summary` hace catch-up el turno siguiente (invariante de fold del Slice 13). |
 
 ## 5. Arquitectura / componentes
@@ -59,8 +59,8 @@ Consecuencia (bug destapado en el smoke del Slice 12/13): dos hechos **contradic
 ### 5.1 Módulos nuevos / expandidos
 | Archivo | Responsabilidad (única) |
 |---|---|
-| `app/memory/long_term.py` (**expandir**) | Capa de vectores/PG. **Nuevo** `probe(practice_id, content) -> Probe{vector, dedup_id, related[Neighbor]}` (1 embed + 1 query; clasifica el vecindario). **Nuevo** `forget(practice_id, ids) -> int` (borra Qdrant→PG). `store` **extendido** con `vector`/`supersede_ids` opcionales (§8.3). `recall` **+ campo `score`** en cada dict (backward-compatible: los callers actuales lo ignoran). Sin dependencia de LLM (esa cognición vive en `reflect`/el nodo). |
-| `app/memory/reflect.py` (**expandir**) | **Nuevo** juez de contradicción `contradiction_judge(new_content, existing_content) -> bool` (e4b structured, `_structured` con retry, sesgo a False). Flujo por candidato pasa a `probe → (dedup? / judge banda) → store(...)` (§8.2). |
+| `app/memory/long_term.py` (**expandir**) | Capa de vectores/PG. **Nuevo** `probe(practice_id, content) -> Probe{vector, related[Neighbor]}` (1 embed + 1 query; vecinos ≥0.6, sin techo). **Nuevo** `forget(practice_id, ids) -> int` (borra Qdrant→PG). `store` **extendido** con `vector`/`supersede_ids` opcionales (§8.3). `recall` **+ campo `score`** en cada dict (backward-compatible: los callers actuales lo ignoran). Sin dependencia de LLM (esa cognición vive en `reflect`/el nodo). |
+| `app/memory/reflect.py` (**expandir**) | **Nuevo** juez 3-vías `judge_neighbor(new_content, existing_content) -> str` (`duplicate`/`supersede`/`distinct`; e4b structured, `_structured` con retry, sesgo a `distinct`). Flujo por candidato pasa a `probe → judge_neighbor por vecino → touch|supersede|store` (§8.2). |
 | `app/graph/memory_command.py` (**nuevo**) | Nodo `memory_command_node(state) -> dict` (B): extrae `{operation, target, new_value}` (e4b structured), find dirigido, `forget`/`store(supersede)`, eco; **self-verify → `chitchat`** ante `none`/fallo. Un solo propósito. *(Alternativa: alojarlo en `memory_nodes.py`; se decide en el plan.)* |
 
 ### 5.2 Módulos modificados
@@ -102,30 +102,32 @@ async def probe(practice_id, content) -> Probe:
     vector = await embed_query(content)
     points = query_points(memories, query=vector, filter=practice+scope,
                           limit=memory_top_k, with_payload=True)   # ordenados por score desc
-    dedup_id = points[0].id  if points and points[0].score >= memory_dedup_threshold  else None
-    related  = [Neighbor(id, payload["content"], score) for p in points
-                if memory_contradiction_low <= p.score < memory_dedup_threshold]
-    return Probe(vector, dedup_id, related[:memory_contradiction_max_candidates])
+    related = [Neighbor(id, payload["content"], score) for p in points
+               if p.score >= memory_contradiction_low]            # TODO ≥ 0.6, SIN techo
+    return Probe(vector, related[:memory_contradiction_max_candidates])
 ```
-Una embed + una query. `dedup_id` reproduce el dedup actual; `related` es la banda a juzgar.
+Una embed + una query. `related` = **todos** los vecinos ≥ `memory_contradiction_low` (0.6), sin cortar en 0.9. **No hay `dedup_id`** en el camino A: la distinción "duplicado vs contradicción" es semántica (el coseno no separa "mismo hecho reformulado" de "mismo sujeto, valor cambiado" — dos frases que difieren solo en un número pueden dar coseno ≥ 0.9) → **la decide el juez** (§8.2), no un umbral. El dedup barato ≥ 0.9 **sobrevive solo** en el camino legacy de `store` (`vector=None`, §8.3) y como bar de "confianza" de B (§8.5).
 
 ### 8.2 Persistencia de un candidato en `reflect` (A)
 ```
 async def _store_candidate(practice_id, cand, source, salience):
     if not memory_contradiction_enabled:
         await long_term.store(practice_id, kind=cand.kind, content=cand.content,
-                              source=source, salience=salience)          # legacy: embed + dedup
+                              source=source, salience=salience)          # legacy: embed + dedup ≥0.9
         return
     p = await long_term.probe(practice_id, cand.content)
-    if p.dedup_id:                                                       # casi-idéntica → dedup actual
-        await long_term.touch_last_used([p.dedup_id]); return
-    supersede_ids = [n.id for n in p.related
-                     if await contradiction_judge(cand.content, n.content)]
+    supersede_ids = []
+    for n in p.related:                                                  # ≤ max_candidates vecinos ≥0.6
+        rel = await judge_neighbor(cand.content, n.content)             # 'duplicate'|'supersede'|'distinct'
+        if rel == "duplicate":
+            await long_term.touch_last_used([n.id]); return             # el hecho ya está guardado
+        if rel == "supersede":
+            supersede_ids.append(n.id)
     await long_term.store(practice_id, kind=cand.kind, content=cand.content,
                           source=source, salience=salience,
                           vector=p.vector, supersede_ids=supersede_ids)  # reusa el vector; borra viejas
 ```
-`contradiction_judge`: e4b structured (`SupersedeVerdict{supersedes: bool, reason: str}`), `_structured` con retry; prompt estricto, sesgo a False (§10). Si el juez devuelve None (e4b caído) → se trata como False (no supersede) → inserta normal (fail-safe: nunca borra por incertidumbre).
+`judge_neighbor(new, existing) -> str`: e4b structured (`NeighborVerdict{relation: Literal["duplicate","supersede","distinct"], reason: str}`), `_structured` con retry, **sesgo a `"distinct"`** (§10). Clasifica la relación del hecho nuevo con cada vecino: `duplicate` (mismo hecho reformulado → touch, no inserta), `supersede` (mismo sujeto/atributo, valor cambiado/negado → borra la vieja), `distinct` (hechos distintos → conviven). Si devuelve None (e4b caído) → `"distinct"` (fail-safe: nunca borra ni deduplifica por incertidumbre). El dedup ahora es **decidido por el juez**, no por umbral → una contradicción a cualquier similitud (incluida ≥0.9) se detecta.
 
 ### 8.3 `store` extendido (backward-compatible)
 ```
@@ -151,11 +153,11 @@ async def store(practice_id, *, kind, content, source, salience,
 ```
 async def forget(practice_id, ids) -> int:
     if not ids: return 0
-    qdrant.delete(memories, points=ids)                                  # Qdrant PRIMERO
+    qdrant.delete(memories, FilterSelector(HasId(ids) AND practice_id==practice_id))  # Qdrant PRIMERO, scoped
     n = execute("DELETE FROM memories WHERE id = ANY($1) AND practice_id = $2", ids, practice_id)
     return n
 ```
-**Orden inverso al de `store` y por la misma razón:** el recall lee el `content` del **payload de Qdrant** (sin join a PG). Borrar Qdrant primero garantiza que —ante un fallo entre las dos— nunca quede un **punto huérfano** que el recall mostraría como memoria fantasma. Un huérfano al revés (fila PG sin vector) es invisible al recall → tolerable. El `AND practice_id` es defensa en profundidad (los ids ya vienen de un find practice-scoped).
+**Orden inverso al de `store` y por la misma razón:** el recall lee el `content` del **payload de Qdrant** (sin join a PG). Borrar Qdrant primero garantiza que —ante un fallo entre las dos— nunca quede un **punto huérfano** que el recall mostraría como memoria fantasma. Un huérfano al revés (fila PG sin vector) es invisible al recall → tolerable. **Ambos lados scoped por `practice_id`** (Qdrant vía `FilterSelector` con `HasId`+match; PG vía `AND practice_id`): consistente aunque llegue un id de otra práctica (borra 0 en ambos). Los ids ya vienen de un find practice-scoped; el scope es defensa en profundidad.
 
 ### 8.5 `memory_command_node` (B)
 ```
@@ -185,15 +187,15 @@ write_token(msg); write_sources([]); return {"sources": [], "messages": [AIMessa
 | Campo | Default | Uso |
 |---|---|---|
 | `memory_contradiction_enabled: bool` | `True` | Kill switch de A. `False` ⇒ `store` legacy (solo dedup). |
-| `memory_contradiction_low: float` | `0.6` | Piso de la banda "mismo tema" a juzgar (techo = `memory_dedup_threshold`). |
-| `memory_contradiction_max_candidates: int` | `3` | Cap de vecinos juzgados por candidato (acota llamadas e4b). |
+| `memory_contradiction_low: float` | `0.6` | Piso de similitud para juzgar un vecino (SIN techo: todo ≥0.6 va al juez 3-vías). |
+| `memory_contradiction_max_candidates: int` | `3` | Cap de vecinos juzgados por candidato (acota llamadas e4b: ≤ max_candidates × ≤3 candidatos por turno). |
 | `memory_command_enabled: bool` | `True` | Kill switch de B (con `False`, el router no debería enrutar acá; el nodo igual se defiende cayendo a chitchat). |
 | `memory_forget_min_score: float` | `0.6` | Umbral de confianza del find de B para actuar sobre un match. |
-Reusa: `memory_dedup_threshold` (0.9, techo de banda A + bar "casi-exacto" de B), `memory_top_k` (límite de `probe`/`recall`), `ollama_model_cheap` (e4b para juez + extracción de comando).
+Reusa: `memory_dedup_threshold` (0.9; dedup barato del camino legacy de `store` con `vector=None` + bar "casi-exacto" de confianza de B), `memory_top_k` (límite de `probe`/`recall`), `ollama_model_cheap` (e4b para juez + extracción de comando).
 
 ## 10. Errores / resiliencia / seguridad
 
-- **A es best-effort (heredado):** vive dentro de `reflect.run` (gate/extract/store con `wait_for(memory_reflect_timeout_s)`); `probe`/juez/`store` que fallen o timeouteen **no rompen el turno**. Juez None (e4b caído) ⇒ **no** supersede (fail-safe: nunca borra por incertidumbre).
+- **A es best-effort (heredado):** vive dentro de `reflect.run` (gate/extract/store con `wait_for(memory_reflect_timeout_s)`); `probe`/juez/`store` que fallen o timeouteen **no rompen el turno**. Juez None (e4b caído) ⇒ `"distinct"` (fail-safe: nunca borra ni deduplifica por incertidumbre → a lo sumo inserta un duplicado, que se resuelve en el próximo turno).
 - **B nunca borra por error:** (a) self-verify `operation=none` → chitchat; (b) sin match → mensaje, no borra; (c) varias fuertes sin dominante → pide detalle, no borra; (d) `extract_command` None → chitchat.
 - **Consistencia PG↔Qdrant:** `store` inserta el nuevo antes de borrar viejos; `forget` borra Qdrant antes que PG. Ambos órdenes eligen, ante fallo parcial, el estado que **no** genera memoria fantasma (punto Qdrant sin PG). Peor caso = orphan tolerable, autosana.
 - **Loop de re-aprendizaje:** `memory_command → END` (salta `reflect`). El `running_summary` puede reflejar "el usuario pidió olvidar X" (es contexto, no una memoria; reflect no lee el summary) → no reintroduce el hecho.
@@ -204,16 +206,16 @@ Reusa: `memory_dedup_threshold` (0.9, techo de banda A + bar "casi-exacto" de B)
 ## 11. Testing
 
 - **Unit** (`-m "not llm"`, stores reales PG+Qdrant; sin Ollama, LLM mockeado donde haga falta):
-  - `long_term.probe`: clasifica dedup (≥0.9) vs banda (`[0.6,0.9)`) vs descarte (<0.6); respeta `max_candidates`; devuelve el vector.
+  - `long_term.probe`: incluye vecinos ≥0.6 en `related` (banda 0.75 y casi-idéntica 0.95 ambas presentes → SIN techo 0.9); excluye <0.6; respeta `max_candidates`; devuelve el vector.
   - `long_term.store(supersede_ids=…)`: inserta el nuevo **y** borra los viejos (PG y Qdrant); orden seguro (si el upsert del nuevo se fuerza a fallar → los viejos **siguen**); sin `vector` ⇒ dedup legacy idéntico.
   - `long_term.forget`: borra PG+Qdrant; `recall` ya no la trae; scoped por `practice_id` (no borra de otra práctica); `[]` → 0.
   - `recall`: ahora incluye `score`; callers existentes (que leen `id`/`content`) intactos.
-  - `reflect._store_candidate` (juez mockeado): `supersedes=True` → `store` con `supersede_ids`; `False` → insert normal; `dedup_id` → solo `touch`; juez None → no supersede; `contradiction_enabled=False` → store legacy.
+  - `reflect._store_candidate` (`judge_neighbor` mockeado): `"supersede"` → `store` con `supersede_ids`; `"duplicate"` → solo `touch`, NO inserta; `"distinct"` → insert sin supersede; `related=[]` → insert sin juez; juez None → `"distinct"`; `contradiction_enabled=False` → store legacy (sin `probe`).
   - `memory_command_node` (LLM + long_term mockeados): forget con 1 match → `forget` + eco; sin match → mensaje sin borrar; varias fuertes → pide detalle sin borrar; `operation=none`/extract None → cae a `chitchat` (verifica que NO llama `forget`); correct → `store(supersede_ids)` + eco.
   - `build.py` wiring: `intent=memory_command → memory_command → END` (NO pasa por `consolidate`); las demás ramas intactas.
   - `router.classify_intent` (fake LLM): "olvidá que…"/"corregí que…" → `memory_command`; el fallback y las 5 intenciones previas no regresionan.
 - **e2e-llm** (`-m llm`, Ollama+PG+Qdrant reales, `checkpointer=None`):
-  - **A:** thread donde se afirma "los turnos duran 30 min", luego "ahora duran 45" → tras el turno, `recall("duración de los turnos")` trae **solo** la de 45.
+  - **A:** memoria sembrada "Los turnos duran 30 minutos." (real embed vía `store`) → `reflect._store_candidate` con candidato "Los turnos duran 45 minutos." (real `probe` + `judge_neighbor` e4b) → PG queda **solo** con la de 45 (aísla el juez del gate/extract, que son más variance-prone). Un e2e full-graph adicional es fast-follow (verbalización, variance).
   - **B forget:** memoria sembrada → "olvidá que …" → `recall` no la trae; el eco lo confirma.
   - **B correct:** "corregí: … ahora …" → la vieja se fue, la nueva está.
 - **Gate:** `-m "not llm"` verde (343 + nuevos); `-m eval` sin regresión (los golden actuales no disparan contradicción/comando → comportamiento idéntico); `ruff`/`mypy app/` verdes.
@@ -229,7 +231,7 @@ Reusa: `memory_dedup_threshold` (0.9, techo de banda A + bar "casi-exacto" de B)
 - **Micro-opt:** `recall_node` corre en el turno de comando y su salida se ignora (el nodo hace su propio find); saltarlo si `intent=memory_command`.
 
 ## 13. Riesgos / gotchas heredados a respetar en implementación
-- **Structured-output e4b `None` intermitente** → `contradiction_judge` y `extract_command` usan `_structured` con retry ≤2x (patrón `reflect.py`); ante None persistente → fail-safe (no supersede / cae a chitchat).
+- **Structured-output e4b `None` intermitente** → `judge_neighbor` y `extract_command` usan `_structured` con retry ≤2x (patrón `reflect.py`); ante None persistente → fail-safe (`"distinct"` / cae a chitchat).
 - **6ta intención en un router e4b frágil:** mitigado por el self-verify del nodo (misroute → chitchat, nunca borra). Agregar golden cases; **no** editar el prompt del router a ciegas (revisar que no degrade las 5 previas).
 - **Firma de `store` (cross-cutting):** nuevos params son opcionales (backward-compatible), pero igual **correr la suite completa `-m "not llm"`**, no solo los archivos tocados (lección Slice 12: la regresión de `_fake_synth` solo la cazó el gate final).
 - **`recall` ahora devuelve `score`:** verificar que `recall_node` y cualquier consumidor no rompan (solo agregan un campo).
