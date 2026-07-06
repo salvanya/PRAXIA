@@ -103,3 +103,27 @@ async def test_B_forget_command_deletes_via_graph() -> None:
         PRACTICE,
     )
     assert n == 0, "la memoria de sábados debió borrarse"
+
+
+async def test_conversational_update_stored_and_superseded_via_graph() -> None:
+    """El smoke destapó que updates conversacionales se perdían por mal routeo a 'memoria'.
+    Con el fix, aunque el router mande estos a 'memoria', caen a consolidate→reflect y el hecho
+    se guarda/supersede (camino A). Prueba sobre PG (source of truth), no sobre la verbalización."""
+    import uuid
+
+    await long_term.ensure_memories_collection()
+    await _wipe()
+    graph = build_graph(checkpointer=None)
+    await graph.ainvoke(
+        new_state(
+            "acordate que los turnos de práctica duran 30 minutos", PRACTICE, uuid.uuid4().hex
+        )
+    )
+    await graph.ainvoke(
+        new_state(
+            "en realidad los turnos de práctica ahora duran 45 minutos", PRACTICE, uuid.uuid4().hex
+        )
+    )
+    contents = await _contents()
+    assert "45" in contents, f"el update conversacional debió guardarse; got: {contents!r}"
+    assert "30" not in contents, f"la contradicción debió superseder; got: {contents!r}"

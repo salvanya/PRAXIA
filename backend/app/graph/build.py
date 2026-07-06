@@ -3,7 +3,7 @@ from typing import Any
 
 from langgraph.graph import END, START, StateGraph
 
-from app.graph.edges import entry_route, route, route_after_propose
+from app.graph.edges import entry_route, route, route_after_memory_command, route_after_propose
 from app.graph.memory_command import memory_command_node
 from app.graph.memory_nodes import consolidate_node, recall_node
 from app.graph.nodes import (
@@ -63,7 +63,11 @@ def build_graph(checkpointer: Any = None) -> Any:
     for node in _CONTENT_LEAVES:
         g.add_edge(node, "consolidate")
     g.add_edge("scope_reject", END)
-    g.add_edge("memory_command", END)  # salta consolidate: no reflect → no re-aprende lo olvidado
+    g.add_conditional_edges(
+        "memory_command",
+        route_after_memory_command,
+        {"consolidate": "consolidate", "end": END},
+    )
     g.add_edge("consolidate", END)
 
     return g.compile(checkpointer=checkpointer)

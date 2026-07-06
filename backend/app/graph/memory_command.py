@@ -19,13 +19,16 @@ class MemoryCommand(BaseModel):
 
 
 EXTRACT_COMMAND_PROMPT = (
-    "El usuario quiere gestionar lo que el asistente RECUERDA de la práctica."
-    " Extraé la operación:\n"
-    "- operation='forget' si pide OLVIDAR/borrar algo ('olvidá que…', 'ya no…', 'borrá de tu "
+    "El usuario le habla a un CRM. Extraé si dio una ORDEN EXPLÍCITA de gestionar lo que el "
+    "asistente RECUERDA:\n"
+    "- operation='forget' si ORDENA olvidar/borrar algo ('olvidá que…', 'ya no…', 'borrá de tu "
     "memoria…').\n"
-    "- operation='correct' si pide CORREGIR/actualizar un dato ('corregí que…', 'en realidad…', "
+    "- operation='correct' si ORDENA corregir/actualizar un dato ('corregí que…', 'corregí:…', "
     "'lo correcto es…').\n"
-    "- operation='none' si NO es un pedido de olvidar ni corregir.\n"
+    "- operation='none' para TODO lo demás: saludos, preguntas, y en particular pedidos de "
+    "RECORDAR algo nuevo ('acordate que…', 'tené en cuenta que…') o simples AFIRMACIONES o "
+    "actualizaciones de un dato ('los turnos duran 30', 'en realidad ahora duran 45'). "
+    "Ante la duda, none.\n"
     "target = el dato viejo a olvidar/corregir, en pocas palabras.\n"
     "new_value = SOLO para 'correct': el dato correcto como frase autocontenida; vacío en el resto."
 )
@@ -57,9 +60,11 @@ async def memory_command_node(state: AgentState) -> dict:
     text = last_user_text(state)
     cmd = await extract_command(text) if s.memory_command_enabled else None
     if cmd is None or cmd.operation == "none":
-        return await chitchat_node(state)  # no era un comando → chat normal, NO borra
+        # no es un comando → chat normal; reflect DEBE correr (no perder el hecho)
+        return {**await chitchat_node(state), "skip_reflect": False}
 
     practice_id = state["practice_id"]
+    skip = cmd.operation == "forget"  # solo el olvido saltea reflect (evita re-learn)
     matches = [
         m
         for m in await long_term.recall(cmd.target, practice_id)
@@ -95,4 +100,4 @@ async def memory_command_node(state: AgentState) -> dict:
 
     write_token(msg)
     write_sources([])
-    return {"sources": [], "messages": [AIMessage(content=msg)]}
+    return {"sources": [], "messages": [AIMessage(content=msg)], "skip_reflect": skip}

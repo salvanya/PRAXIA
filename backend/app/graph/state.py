@@ -27,6 +27,7 @@ class AgentState(TypedDict):
     memories: list[dict]
     running_summary: str
     summarized_count: int
+    skip_reflect: bool
 
 
 def new_state(message: str, practice_id: str, thread_id: str) -> AgentState:
@@ -44,6 +45,7 @@ def new_state(message: str, practice_id: str, thread_id: str) -> AgentState:
         "memories": [],
         "running_summary": "",
         "summarized_count": 0,
+        "skip_reflect": False,
     }
 
 

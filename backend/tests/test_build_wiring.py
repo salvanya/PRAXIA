@@ -7,11 +7,11 @@ def test_memory_nodes_are_wired() -> None:
     assert {"recall", "consolidate", "memory_command"} <= nodes
 
 
-def test_memory_command_goes_to_end_not_consolidate() -> None:
+def test_memory_command_conditional_reflect_wiring() -> None:
     graph = build_graph(checkpointer=None)
     g = graph.get_graph()
     targets = {e.target for e in g.edges if e.source == "memory_command"}
-    assert "__end__" in targets and "consolidate" not in targets
+    assert "consolidate" in targets and "__end__" in targets  # condicional: reflect salvo forget
 
 
 def test_graph_compiles_without_checkpointer() -> None:

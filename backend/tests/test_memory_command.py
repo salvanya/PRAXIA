@@ -23,6 +23,11 @@ async def _run(node, state):
     return tokens
 
 
+async def _final(node, state):
+    graph = _one_node_graph(node)
+    return await graph.ainvoke(state)
+
+
 def _match(mid="m1", content="Los turnos duran 30 minutos.", score=0.95, kind="hecho"):
     return {"id": mid, "content": content, "kind": kind, "scope": "practice", "score": score}
 
@@ -217,3 +222,62 @@ async def test_disabled_falls_back_to_chitchat(monkeypatch):
     assert called["chitchat"] is True
     assert called["forget"] is False
     assert called["extract"] is False  # enabled=False short-circuits ANTES de extraer
+
+
+async def test_forget_sets_skip_reflect_true(monkeypatch):
+    async def _extract(text):
+        return MemoryCommand(operation="forget", target="duración de turnos", new_value="")
+
+    async def _recall(query, practice_id):
+        return [_match()]
+
+    async def _forget(practice_id, ids):
+        return len(ids)
+
+    monkeypatch.setattr(memory_command, "extract_command", _extract)
+    monkeypatch.setattr(memory_command.long_term, "recall", _recall)
+    monkeypatch.setattr(memory_command.long_term, "forget", _forget)
+    out = await _final(
+        memory_command.memory_command_node, new_state("olvidá la duración", "p", "t")
+    )
+    assert out["skip_reflect"] is True
+
+
+async def test_correct_sets_skip_reflect_false(monkeypatch):
+    async def _extract(text):
+        return MemoryCommand(
+            operation="correct", target="duración", new_value="Los turnos duran 60 minutos."
+        )
+
+    async def _recall(query, practice_id):
+        return [_match()]
+
+    async def _store(
+        practice_id, *, kind, content, source, salience, vector=None, supersede_ids=()
+    ):
+        return "new1"
+
+    monkeypatch.setattr(memory_command, "extract_command", _extract)
+    monkeypatch.setattr(memory_command.long_term, "recall", _recall)
+    monkeypatch.setattr(memory_command.long_term, "store", _store)
+    out = await _final(
+        memory_command.memory_command_node, new_state("corregí la duración", "p", "t")
+    )
+    assert out["skip_reflect"] is False
+
+
+async def test_fallback_sets_skip_reflect_false(monkeypatch):
+    async def _extract(text):
+        return MemoryCommand(operation="none", target="", new_value="")
+
+    async def _chit(state):
+        return {"sources": [], "messages": []}
+
+    async def _no_forget(practice_id, ids):
+        raise AssertionError("no debe borrar en el fallback")
+
+    monkeypatch.setattr(memory_command, "extract_command", _extract)
+    monkeypatch.setattr(memory_command, "chitchat_node", _chit)
+    monkeypatch.setattr(memory_command.long_term, "forget", _no_forget)
+    out = await _final(memory_command.memory_command_node, new_state("hola", "p", "t"))
+    assert out["skip_reflect"] is False

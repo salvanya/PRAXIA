@@ -17,9 +17,13 @@ ROUTER_PROMPT = (
     '"marcá a Juan como inactivo".\n'
     "- chitchat: saludo, charla trivial o pregunta sobre lo conversado antes. "
     'Ej: "hola", "gracias", "¿cómo estás?", "¿qué te dije?", "¿lo recordás?".\n'
-    "- memoria: el usuario pide OLVIDAR o CORREGIR algo que Praxia recuerda de la práctica. "
+    "- memoria: SOLO cuando el usuario da una ORDEN EXPLÍCITA de OLVIDAR o CORREGIR algo que "
+    "Praxia YA recuerda. "
     'Ej: "olvidá que los turnos duran 30 min", "ya no atendemos sábados", '
-    '"corregí que la primera consulta dura 45 minutos".\n'
+    '"borrá de tu memoria lo del feriado", "corregí que la primera consulta dura 45 minutos". '
+    'NO uses memoria para pedir RECORDAR algo nuevo ("acordate que…", "tené en cuenta que…") '
+    'ni para simples afirmaciones/actualizaciones de un dato ("los turnos duran 30", '
+    '"en realidad ahora duran 45") — eso es chitchat.\n'
     "- out_of_scope: fuera del dominio de la práctica (cocina, política, código, etc.). "
     'Ej: "¿cuál es la capital de Francia?", "escribime un poema".\n'
     "Respondé solo con la intención."
