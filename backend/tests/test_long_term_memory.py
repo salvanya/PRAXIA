@@ -179,3 +179,67 @@ async def test_probe_caps_candidates(monkeypatch) -> None:
     p = await long_term.probe(PRACTICE, "q")
     assert len(p.related) == 2  # los 3 están ≥0.6, pero capea a 2
     assert [round(n.score, 2) for n in p.related] == [0.8, 0.75]  # top-2 por score
+
+
+async def test_store_supersede_replaces_old(monkeypatch) -> None:
+    vecs = {"vieja": _ANCHOR, "nueva": _BAND}
+    monkeypatch.setattr(long_term, "embed_query", lambda text: _async(vecs[text]))
+    old = await long_term.store(
+        PRACTICE, kind="hecho", content="vieja", source="reflexion", salience=0.5
+    )
+    assert old is not None
+    new = await long_term.store(
+        PRACTICE,
+        kind="hecho",
+        content="nueva",
+        source="reflexion",
+        salience=0.5,
+        vector=_BAND,
+        supersede_ids=[old],
+    )
+    assert new is not None and new != old
+    from app.db import get_pool
+
+    pool = await get_pool()
+    assert await pool.fetchval("SELECT count(*) FROM memories WHERE id = $1", old) == 0  # se fue
+    assert await pool.fetchval("SELECT count(*) FROM memories WHERE id = $1", new) == 1
+    contents = [h["content"] for h in await long_term.recall("nueva", PRACTICE)]
+    assert "nueva" in contents and "vieja" not in contents  # también salió de Qdrant
+
+
+async def test_store_with_vector_skips_dedup(monkeypatch) -> None:
+    monkeypatch.setattr(long_term, "embed_query", lambda text: _async(_ANCHOR))
+    a = await long_term.store(
+        PRACTICE, kind="hecho", content="x1", source="reflexion", salience=0.5
+    )
+    # mismo vector: sin `vector` deduplicaría (None); con `vector` provisto NO deduplica
+    b = await long_term.store(
+        PRACTICE, kind="hecho", content="x2", source="reflexion", salience=0.5, vector=_ANCHOR
+    )
+    assert a is not None and b is not None
+
+
+async def test_store_supersede_safe_order_keeps_old_on_failure(monkeypatch) -> None:
+    monkeypatch.setattr(long_term, "embed_query", lambda text: _async(_ANCHOR))
+    old = await long_term.store(
+        PRACTICE, kind="hecho", content="vieja", source="reflexion", salience=0.5
+    )
+
+    async def _boom(*a, **k):
+        raise RuntimeError("qdrant down")
+
+    monkeypatch.setattr(long_term.get_client(), "upsert", _boom)  # el upsert del NUEVO falla
+    with pytest.raises(RuntimeError):
+        await long_term.store(
+            PRACTICE,
+            kind="hecho",
+            content="nueva",
+            source="reflexion",
+            salience=0.5,
+            vector=_BAND,
+            supersede_ids=[old],
+        )
+    from app.db import get_pool
+
+    pool = await get_pool()
+    assert await pool.fetchval("SELECT count(*) FROM memories WHERE id = $1", old) == 1  # SIGUE

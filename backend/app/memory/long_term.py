@@ -149,18 +149,29 @@ async def forget(practice_id: str, ids: list[str]) -> int:
 
 
 async def store(
-    practice_id: str, *, kind: str, content: str, source: str, salience: float
+    practice_id: str,
+    *,
+    kind: str,
+    content: str,
+    source: str,
+    salience: float,
+    vector: list[float] | None = None,
+    supersede_ids: list[str] | tuple[str, ...] = (),
 ) -> str | None:
-    """Persiste una memoria practice-scope: dedup por coseno → PG (verdad) → Qdrant (vector).
+    """Persiste una memoria practice-scope.
 
-    Devuelve el id, o None si era duplicada
-    (score >= memory_dedup_threshold → solo toca la existente)."""
+    - vector=None: camino legacy → embed + dedup por coseno (≥ memory_dedup_threshold → touch +
+      None). Backward-compatible con callers/tests que no probaron el vecindario.
+    - vector provisto: el caller ya hizo `probe` → NO se re-deduplica; inserta y LUEGO borra
+      `supersede_ids`. Orden seguro: el nuevo queda durable ANTES de borrar los viejos, así un
+      fallo intermedio nunca pierde dato (peor caso: viejo+nuevo conviven, autosana)."""
     s = get_settings()
-    vector = await embed_query(content)
-    match = await _top_match(practice_id, vector)
-    if match is not None and match[1] >= s.memory_dedup_threshold:
-        await touch_last_used([match[0]])
-        return None
+    if vector is None:
+        vector = await embed_query(content)
+        match = await _top_match(practice_id, vector)
+        if match is not None and match[1] >= s.memory_dedup_threshold:
+            await touch_last_used([match[0]])
+            return None
     mem_id = str(uuid.uuid4())
     pool = await get_pool()
     await pool.execute(
@@ -194,4 +205,9 @@ async def store(
         # compensación: nunca dejar PG-sin-vector (memoria invisible al recall)
         await pool.execute("DELETE FROM memories WHERE id = $1", mem_id)
         raise
+    if supersede_ids:
+        try:
+            await forget(practice_id, list(supersede_ids))
+        except Exception:  # noqa: BLE001 - el nuevo ya está durable; un orphan viejo no es fatal
+            logger.warning("supersede: forget de viejas falló (orphan, no fatal)", exc_info=True)
     return mem_id
