@@ -168,10 +168,11 @@ async def store(
     s = get_settings()
     if vector is None:
         vector = await embed_query(content)
-        match = await _top_match(practice_id, vector)
-        if match is not None and match[1] >= s.memory_dedup_threshold:
-            await touch_last_used([match[0]])
-            return None
+        if not supersede_ids:  # un supersede explícito nunca se enmascara como duplicado
+            match = await _top_match(practice_id, vector)
+            if match is not None and match[1] >= s.memory_dedup_threshold:
+                await touch_last_used([match[0]])
+                return None
     mem_id = str(uuid.uuid4())
     pool = await get_pool()
     await pool.execute(

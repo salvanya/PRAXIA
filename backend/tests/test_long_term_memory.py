@@ -219,6 +219,30 @@ async def test_store_with_vector_skips_dedup(monkeypatch) -> None:
     assert a is not None and b is not None
 
 
+async def test_store_supersede_without_vector_skips_dedup(monkeypatch) -> None:
+    """B-correct: store(content, supersede_ids=[old]) SIN vector, con content que embebe >=0.9 a
+    old, debe INSERTAR la nueva + FORGET la vieja (no dedup-skip)."""
+    monkeypatch.setattr(long_term, "embed_query", lambda text: _async(_ANCHOR))
+    old = await long_term.store(
+        PRACTICE, kind="hecho", content="vieja", source="reflexion", salience=0.5
+    )
+    assert old is not None
+    new = await long_term.store(
+        PRACTICE,
+        kind="hecho",
+        content="nueva",
+        source="explicito",
+        salience=0.8,
+        supersede_ids=[old],
+    )
+    assert new is not None and new != old  # NO dedup-skipped pese al mismo vector
+    from app.db import get_pool
+
+    pool = await get_pool()
+    assert await pool.fetchval("SELECT count(*) FROM memories WHERE id = $1", old) == 0
+    assert await pool.fetchval("SELECT count(*) FROM memories WHERE id = $1", new) == 1
+
+
 async def test_store_supersede_safe_order_keeps_old_on_failure(monkeypatch) -> None:
     monkeypatch.setattr(long_term, "embed_query", lambda text: _async(_ANCHOR))
     old = await long_term.store(

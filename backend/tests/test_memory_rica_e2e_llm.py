@@ -63,6 +63,25 @@ async def test_A_supersede_replaces_contradicting_fact() -> None:
     assert "30" not in contents, f"la contradictoria debió superseder; got: {contents!r}"
 
 
+async def test_B_correct_command_supersedes_via_graph() -> None:
+    """B-correct: 'corregí: los turnos ahora duran 45 minutos' debe reemplazar el viejo '30 min'."""
+    await long_term.ensure_memories_collection()
+    await _wipe()
+    await long_term.store(
+        PRACTICE,
+        kind="hecho",
+        content="Los turnos duran 30 minutos.",
+        source="explicito",
+        salience=0.8,
+    )
+    graph = build_graph(checkpointer=None)
+    await graph.ainvoke(
+        new_state("corregí: los turnos ahora duran 45 minutos", PRACTICE, uuid.uuid4().hex)
+    )
+    contents = await _contents()
+    assert "45" in contents and "30" not in contents
+
+
 async def test_B_forget_command_deletes_via_graph() -> None:
     """B: 'olvidá que…' por el grafo real borra la memoria (router → memory_command → forget)."""
     await long_term.ensure_memories_collection()
