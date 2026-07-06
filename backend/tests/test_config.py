@@ -42,3 +42,14 @@ def test_pii_redaction_enabled_reads_env(monkeypatch) -> None:  # type: ignore[n
     monkeypatch.setenv("PII_REDACTION_ENABLED", "false")
     get_settings.cache_clear()
     assert get_settings().pii_redaction_enabled is False
+
+
+def test_memoria_rica_defaults() -> None:
+    from app.config import Settings
+
+    s = Settings()
+    assert s.memory_contradiction_enabled is True
+    assert s.memory_contradiction_low == 0.6
+    assert s.memory_contradiction_max_candidates == 3
+    assert s.memory_command_enabled is True
+    assert s.memory_forget_min_score == 0.6

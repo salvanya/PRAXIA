@@ -45,6 +45,13 @@ class Settings(BaseSettings):
     memory_reflect_max_candidates: int = 3
     memory_reflect_timeout_s: float = 10.0
 
+    # Memoria RICA (Fase 2 Slice 4)
+    memory_contradiction_enabled: bool = True  # kill switch de A (auto-supersede)
+    memory_contradiction_low: float = 0.6  # piso de similitud para juzgar un vecino (sin techo)
+    memory_contradiction_max_candidates: int = 3  # cap de vecinos juzgados por candidato
+    memory_command_enabled: bool = True  # kill switch de B (comando olvidá/corregí)
+    memory_forget_min_score: float = 0.6  # umbral de confianza del find de B
+
     # Context Manager (Fase 2 Slice 3)
     context_token_budget: int = (
         3000  # tokens aprox del ensamblado de chitchat (holgado bajo num_ctx)

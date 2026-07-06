@@ -1,3 +1,5 @@
+import math
+
 import pytest
 
 from app.config import get_settings
@@ -10,6 +12,22 @@ PRACTICE = "00000000-0000-0000-0000-0000000000a1"
 # vectores unitarios controlados (evita cargar bge-m3 y hace la similitud determinista)
 _V_A = [1.0] + [0.0] * 1023
 _V_B = [0.0, 1.0] + [0.0] * 1022
+
+
+def _vec(x0: float, x1: float = 0.0, dim1: int = 1) -> list[float]:
+    """Vector unitario controlado: componente primaria en dim 0, secundaria en `dim1` (def. 1)."""
+    v = [0.0] * 1024
+    v[0] = x0
+    v[dim1] = x1
+    return v
+
+
+_ANCHOR = _vec(1.0)
+_BAND = _vec(0.75, math.sqrt(1 - 0.75**2))  # coseno 0.75 con _ANCHOR → dentro de banda
+_NEAR = _vec(
+    0.95, math.sqrt(1 - 0.95**2)
+)  # coseno 0.95 → casi-idéntico, SIGUE en related (sin techo)
+_ORTHO = _vec(0.0, 1.0)  # coseno 0 → fuera
 
 
 def _async(value):
@@ -124,3 +142,40 @@ async def test_recall_includes_score(monkeypatch) -> None:
     )
     hits = await long_term.recall("con score", PRACTICE)
     assert hits and isinstance(hits[0]["score"], float)
+
+
+async def test_probe_includes_band_and_near_no_ceiling(monkeypatch) -> None:
+    vecs = {"ancla": _ANCHOR, "banda": _BAND, "near": _NEAR, "orto": _ORTHO}
+    monkeypatch.setattr(long_term, "embed_query", lambda text: _async(vecs[text]))
+    await long_term.store(PRACTICE, kind="hecho", content="ancla", source="reflexion", salience=0.5)
+
+    banda = await long_term.probe(PRACTICE, "banda")  # 0.75
+    assert [n.content for n in banda.related] == ["ancla"]
+    assert banda.vector == _BAND
+
+    near = await long_term.probe(PRACTICE, "near")  # 0.95 → SIN techo, sigue siendo related
+    assert [n.content for n in near.related] == ["ancla"]
+
+    orto = await long_term.probe(PRACTICE, "orto")  # 0.0 → excluido
+    assert orto.related == []
+
+
+async def test_probe_caps_candidates(monkeypatch) -> None:
+    from app.config import Settings
+
+    # Cada vector lleva su componente secundaria en una dimensión distinta (10, 11, 12)
+    # para que cos(bi, bj) ≈ xi*xj ≈ 0.5-0.6 << 0.9 y el dedup de store no dispare.
+    # cos(bi, _ANCHOR=[1,0,...]) = bi[0] = 0.70/0.75/0.80 exacto (el resto es 0 en dim 0).
+    b1 = _vec(0.70, math.sqrt(1 - 0.49), 10)
+    b2 = _vec(0.75, math.sqrt(1 - 0.5625), 11)
+    b3 = _vec(0.80, math.sqrt(1 - 0.64), 12)
+    vecs = {"n1": b1, "n2": b2, "n3": b3, "q": _ANCHOR}
+    monkeypatch.setattr(long_term, "embed_query", lambda text: _async(vecs[text]))
+    for c in ("n1", "n2", "n3"):
+        await long_term.store(PRACTICE, kind="hecho", content=c, source="reflexion", salience=0.5)
+    monkeypatch.setattr(
+        long_term, "get_settings", lambda: Settings(memory_contradiction_max_candidates=2)
+    )
+    p = await long_term.probe(PRACTICE, "q")
+    assert len(p.related) == 2  # los 3 están ≥0.6, pero capea a 2
+    assert [round(n.score, 2) for n in p.related] == [0.8, 0.75]  # top-2 por score

@@ -1,5 +1,6 @@
 import logging
 import uuid
+from dataclasses import dataclass
 from typing import Any
 
 from qdrant_client import models
@@ -19,6 +20,44 @@ def _practice_filter(practice_id: str) -> models.Filter:
             models.FieldCondition(key="scope", match=models.MatchValue(value="practice")),
         ]
     )
+
+
+@dataclass
+class Neighbor:
+    id: str
+    content: str
+    score: float
+
+
+@dataclass
+class Probe:
+    vector: list[float]
+    related: list[Neighbor]
+
+
+async def probe(practice_id: str, content: str) -> Probe:
+    """Embebe `content` y devuelve los vecinos practice-scope con score >= contradiction_low.
+
+    SIN techo: la distinción duplicado/contradicción es semántica (el coseno no separa
+    'mismo hecho reformulado' de 'mismo sujeto, valor cambiado' — 30→45 min puede dar >=0.9)
+    → la decide el juez (reflect.judge_neighbor), no un umbral. Reusa el vector para el store."""
+    s = get_settings()
+    vector = await embed_query(content)
+    result = await get_client().query_points(
+        collection_name=s.qdrant_memories_collection,
+        query=vector,
+        query_filter=_practice_filter(practice_id),
+        limit=s.memory_top_k,
+        with_payload=True,
+    )
+    related: list[Neighbor] = []
+    for point in result.points:
+        if point.score >= s.memory_contradiction_low:
+            payload = point.payload or {}
+            related.append(
+                Neighbor(id=str(point.id), content=payload["content"], score=point.score)
+            )
+    return Probe(vector=vector, related=related[: s.memory_contradiction_max_candidates])
 
 
 async def ensure_memories_collection() -> None:
