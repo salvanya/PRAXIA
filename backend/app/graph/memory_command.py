@@ -55,7 +55,8 @@ async def extract_command(text: str) -> MemoryCommand | None:
 
 async def memory_command_node(state: AgentState) -> dict:
     """Camino B: olvidá/corregí inline con eco. Self-verify (misroute → chitchat, nunca borra);
-    borra solo con match confiable; ambigüedad → pide detalle. Va a END (salta consolidate)."""
+    borra solo con match confiable; ambigüedad → pide detalle. skip_reflect=True SOLO en forget
+    (→ END, no re-aprende lo olvidado); correct/fallback pasan por consolidate→reflect."""
     s = get_settings()
     text = last_user_text(state)
     cmd = await extract_command(text) if s.memory_command_enabled else None
