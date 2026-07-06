@@ -1,5 +1,6 @@
 from langgraph.graph import END, START, StateGraph
 
+from app.config import Settings
 from app.graph import memory_command
 from app.graph.memory_command import MemoryCommand
 from app.graph.state import AgentState, new_state
@@ -110,7 +111,7 @@ async def test_none_falls_back_to_chitchat(monkeypatch):
 
 
 async def test_extract_none_falls_back_to_chitchat(monkeypatch):
-    called = {"chitchat": False}
+    called = {"chitchat": False, "forget": False}
 
     async def _extract(text):
         return None
@@ -119,10 +120,15 @@ async def test_extract_none_falls_back_to_chitchat(monkeypatch):
         called["chitchat"] = True
         return {"sources": [], "messages": []}
 
+    async def _forget(practice_id, ids):
+        called["forget"] = True
+
     monkeypatch.setattr(memory_command, "extract_command", _extract)
     monkeypatch.setattr(memory_command, "chitchat_node", _chitchat)
+    monkeypatch.setattr(memory_command.long_term, "forget", _forget)
     await _run(memory_command.memory_command_node, new_state("cualquier cosa", "p", "t"))
     assert called["chitchat"] is True
+    assert called["forget"] is False
 
 
 async def test_correct_supersedes_with_new_value(monkeypatch):
@@ -141,7 +147,13 @@ async def test_correct_supersedes_with_new_value(monkeypatch):
     async def _store(
         practice_id, *, kind, content, source, salience, vector=None, supersede_ids=()
     ):
-        calls["store"] = {"content": content, "supersede_ids": list(supersede_ids)}
+        calls["store"] = {
+            "content": content,
+            "kind": kind,
+            "source": source,
+            "salience": salience,
+            "supersede_ids": list(supersede_ids),
+        }
         return "new1"
 
     monkeypatch.setattr(memory_command, "extract_command", _extract)
@@ -150,7 +162,13 @@ async def test_correct_supersedes_with_new_value(monkeypatch):
     tokens = await _run(
         memory_command.memory_command_node, new_state("corregí la duración", "p", "t")
     )
-    assert calls["store"] == {"content": "Los turnos duran 60 minutos.", "supersede_ids": ["m1"]}
+    assert calls["store"] == {
+        "content": "Los turnos duran 60 minutos.",
+        "kind": "hecho",
+        "source": "explicito",
+        "salience": 0.8,
+        "supersede_ids": ["m1"],
+    }
     assert "corregido" in tokens.lower()
 
 
@@ -173,3 +191,29 @@ async def test_correct_without_value_asks_and_does_not_store(monkeypatch):
         memory_command.memory_command_node, new_state("corregí la duración", "p", "t")
     )
     assert "dato correcto" in tokens.lower() and calls["store"] is False
+
+
+async def test_disabled_falls_back_to_chitchat(monkeypatch):
+    called = {"chitchat": False, "forget": False, "extract": False}
+
+    async def _extract(text):
+        called["extract"] = True
+        return None
+
+    async def _chitchat(state):
+        called["chitchat"] = True
+        return {"sources": [], "messages": []}
+
+    async def _forget(practice_id, ids):
+        called["forget"] = True
+
+    monkeypatch.setattr(
+        memory_command, "get_settings", lambda: Settings(memory_command_enabled=False)
+    )
+    monkeypatch.setattr(memory_command, "extract_command", _extract)
+    monkeypatch.setattr(memory_command, "chitchat_node", _chitchat)
+    monkeypatch.setattr(memory_command.long_term, "forget", _forget)
+    await _run(memory_command.memory_command_node, new_state("olvidá algo", "p", "t"))
+    assert called["chitchat"] is True
+    assert called["forget"] is False
+    assert called["extract"] is False  # enabled=False short-circuits ANTES de extraer
