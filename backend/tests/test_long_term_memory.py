@@ -85,3 +85,42 @@ async def test_recall_respects_min_score(monkeypatch) -> None:
     )  # query ortogonal (score 0)
     hits = await long_term.recall("nada que ver", PRACTICE)
     assert hits == []
+
+
+async def test_forget_removes_from_pg_and_qdrant(monkeypatch) -> None:
+    monkeypatch.setattr(long_term, "embed_query", lambda text: _async(_V_A))
+    mid = await long_term.store(
+        PRACTICE, kind="hecho", content="borrame", source="reflexion", salience=0.5
+    )
+    assert mid is not None
+    n = await long_term.forget(PRACTICE, [mid])
+    assert n == 1
+    assert await long_term.recall("borrame", PRACTICE) == []  # ya no está en Qdrant
+    from app.db import get_pool
+
+    pool = await get_pool()
+    assert await pool.fetchval("SELECT count(*) FROM memories WHERE id = $1", mid) == 0
+
+
+async def test_forget_empty_is_noop() -> None:
+    assert await long_term.forget(PRACTICE, []) == 0
+
+
+async def test_forget_scoped_to_practice(monkeypatch) -> None:
+    monkeypatch.setattr(long_term, "embed_query", lambda text: _async(_V_A))
+    mid = await long_term.store(
+        PRACTICE, kind="hecho", content="mia", source="reflexion", salience=0.5
+    )
+    # otra práctica NO puede borrar esta memoria (uuid válido, distinto)
+    n = await long_term.forget("00000000-0000-0000-0000-0000000000ff", [mid])
+    assert n == 0
+    assert any("mia" in h["content"] for h in await long_term.recall("mia", PRACTICE))
+
+
+async def test_recall_includes_score(monkeypatch) -> None:
+    monkeypatch.setattr(long_term, "embed_query", lambda text: _async(_V_A))
+    await long_term.store(
+        PRACTICE, kind="hecho", content="con score", source="reflexion", salience=0.5
+    )
+    hits = await long_term.recall("con score", PRACTICE)
+    assert hits and isinstance(hits[0]["score"], float)

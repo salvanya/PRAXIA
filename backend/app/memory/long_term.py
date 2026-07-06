@@ -51,6 +51,7 @@ async def recall(query: str, practice_id: str) -> list[dict[str, Any]]:
                 "content": payload["content"],
                 "kind": payload.get("kind", "hecho"),
                 "scope": payload.get("scope", "practice"),
+                "score": point.score,
             }
         )
     return out
@@ -75,6 +76,37 @@ async def touch_last_used(ids: list[str]) -> None:
         return
     pool = await get_pool()
     await pool.execute("UPDATE memories SET last_used_at = now() WHERE id = ANY($1::uuid[])", ids)
+
+
+async def forget(practice_id: str, ids: list[str]) -> int:
+    """Borra memorias por id (Qdrant PRIMERO, luego PG), ambos lados scoped por practice_id.
+
+    Qdrant primero porque el recall lee el `content` del payload de Qdrant (sin join a PG):
+    borrar el vector antes garantiza que un fallo parcial no deje un punto huérfano que el
+    recall mostraría como memoria fantasma. Devuelve cuántas filas PG se borraron."""
+    if not ids:
+        return 0
+    s = get_settings()
+    await get_client().delete(
+        collection_name=s.qdrant_memories_collection,
+        points_selector=models.FilterSelector(
+            filter=models.Filter(
+                must=[
+                    models.HasIdCondition(has_id=list(ids)),
+                    models.FieldCondition(
+                        key="practice_id", match=models.MatchValue(value=practice_id)
+                    ),
+                ]
+            )
+        ),
+    )
+    pool = await get_pool()
+    result = await pool.execute(
+        "DELETE FROM memories WHERE id = ANY($1::uuid[]) AND practice_id = $2",
+        list(ids),
+        practice_id,
+    )
+    return int(result.split()[-1]) if result else 0
 
 
 async def store(
