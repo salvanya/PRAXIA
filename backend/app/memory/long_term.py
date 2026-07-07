@@ -1,5 +1,6 @@
 import logging
 import uuid
+from dataclasses import dataclass
 from typing import Any
 
 from qdrant_client import models
@@ -19,6 +20,44 @@ def _practice_filter(practice_id: str) -> models.Filter:
             models.FieldCondition(key="scope", match=models.MatchValue(value="practice")),
         ]
     )
+
+
+@dataclass
+class Neighbor:
+    id: str
+    content: str
+    score: float
+
+
+@dataclass
+class Probe:
+    vector: list[float]
+    related: list[Neighbor]
+
+
+async def probe(practice_id: str, content: str) -> Probe:
+    """Embebe `content` y devuelve los vecinos practice-scope con score >= contradiction_low.
+
+    SIN techo: la distinción duplicado/contradicción es semántica (el coseno no separa
+    'mismo hecho reformulado' de 'mismo sujeto, valor cambiado' — 30→45 min puede dar >=0.9)
+    → la decide el juez (reflect.judge_neighbor), no un umbral. Reusa el vector para el store."""
+    s = get_settings()
+    vector = await embed_query(content)
+    result = await get_client().query_points(
+        collection_name=s.qdrant_memories_collection,
+        query=vector,
+        query_filter=_practice_filter(practice_id),
+        limit=s.memory_top_k,
+        with_payload=True,
+    )
+    related: list[Neighbor] = []
+    for point in result.points:
+        if point.score >= s.memory_contradiction_low:
+            payload = point.payload or {}
+            related.append(
+                Neighbor(id=str(point.id), content=payload["content"], score=point.score)
+            )
+    return Probe(vector=vector, related=related[: s.memory_contradiction_max_candidates])
 
 
 async def ensure_memories_collection() -> None:
@@ -51,6 +90,7 @@ async def recall(query: str, practice_id: str) -> list[dict[str, Any]]:
                 "content": payload["content"],
                 "kind": payload.get("kind", "hecho"),
                 "scope": payload.get("scope", "practice"),
+                "score": point.score,
             }
         )
     return out
@@ -77,19 +117,62 @@ async def touch_last_used(ids: list[str]) -> None:
     await pool.execute("UPDATE memories SET last_used_at = now() WHERE id = ANY($1::uuid[])", ids)
 
 
-async def store(
-    practice_id: str, *, kind: str, content: str, source: str, salience: float
-) -> str | None:
-    """Persiste una memoria practice-scope: dedup por coseno → PG (verdad) → Qdrant (vector).
+async def forget(practice_id: str, ids: list[str]) -> int:
+    """Borra memorias por id (Qdrant PRIMERO, luego PG), ambos lados scoped por practice_id.
 
-    Devuelve el id, o None si era duplicada
-    (score >= memory_dedup_threshold → solo toca la existente)."""
+    Qdrant primero porque el recall lee el `content` del payload de Qdrant (sin join a PG):
+    borrar el vector antes garantiza que un fallo parcial no deje un punto huérfano que el
+    recall mostraría como memoria fantasma. Devuelve cuántas filas PG se borraron."""
+    if not ids:
+        return 0
     s = get_settings()
-    vector = await embed_query(content)
-    match = await _top_match(practice_id, vector)
-    if match is not None and match[1] >= s.memory_dedup_threshold:
-        await touch_last_used([match[0]])
-        return None
+    await get_client().delete(
+        collection_name=s.qdrant_memories_collection,
+        points_selector=models.FilterSelector(
+            filter=models.Filter(
+                must=[
+                    models.HasIdCondition(has_id=list(ids)),
+                    models.FieldCondition(
+                        key="practice_id", match=models.MatchValue(value=practice_id)
+                    ),
+                ]
+            )
+        ),
+    )
+    pool = await get_pool()
+    result = await pool.execute(
+        "DELETE FROM memories WHERE id = ANY($1::uuid[]) AND practice_id = $2",
+        list(ids),
+        practice_id,
+    )
+    return int(result.split()[-1]) if result else 0
+
+
+async def store(
+    practice_id: str,
+    *,
+    kind: str,
+    content: str,
+    source: str,
+    salience: float,
+    vector: list[float] | None = None,
+    supersede_ids: list[str] | tuple[str, ...] = (),
+) -> str | None:
+    """Persiste una memoria practice-scope.
+
+    - vector=None: camino legacy → embed + dedup por coseno (≥ memory_dedup_threshold → touch +
+      None). Backward-compatible con callers/tests que no probaron el vecindario.
+    - vector provisto: el caller ya hizo `probe` → NO se re-deduplica; inserta y LUEGO borra
+      `supersede_ids`. Orden seguro: el nuevo queda durable ANTES de borrar los viejos, así un
+      fallo intermedio nunca pierde dato (peor caso: viejo+nuevo conviven, autosana)."""
+    s = get_settings()
+    if vector is None:
+        vector = await embed_query(content)
+        if not supersede_ids:  # un supersede explícito nunca se enmascara como duplicado
+            match = await _top_match(practice_id, vector)
+            if match is not None and match[1] >= s.memory_dedup_threshold:
+                await touch_last_used([match[0]])
+                return None
     mem_id = str(uuid.uuid4())
     pool = await get_pool()
     await pool.execute(
@@ -123,4 +206,9 @@ async def store(
         # compensación: nunca dejar PG-sin-vector (memoria invisible al recall)
         await pool.execute("DELETE FROM memories WHERE id = $1", mem_id)
         raise
+    if supersede_ids:
+        try:
+            await forget(practice_id, list(supersede_ids))
+        except Exception:  # noqa: BLE001 - el nuevo ya está durable; un orphan viejo no es fatal
+            logger.warning("supersede: forget de viejas falló (orphan, no fatal)", exc_info=True)
     return mem_id

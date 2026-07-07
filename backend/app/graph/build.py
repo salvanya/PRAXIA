@@ -3,7 +3,8 @@ from typing import Any
 
 from langgraph.graph import END, START, StateGraph
 
-from app.graph.edges import entry_route, route, route_after_propose
+from app.graph.edges import entry_route, route, route_after_memory_command, route_after_propose
+from app.graph.memory_command import memory_command_node
 from app.graph.memory_nodes import consolidate_node, recall_node
 from app.graph.nodes import (
     chitchat_node,
@@ -33,6 +34,7 @@ def build_graph(checkpointer: Any = None) -> Any:
     g.add_node("confirm_action", confirm_action_node)
     g.add_node("clarify", clarify_node)
     g.add_node("consolidate", consolidate_node)
+    g.add_node("memory_command", memory_command_node)
 
     g.add_conditional_edges(START, entry_route, {"clarify": "clarify", "router": "router"})
     g.add_edge("router", "recall")
@@ -45,6 +47,7 @@ def build_graph(checkpointer: Any = None) -> Any:
             "scope_reject": "scope_reject",
             "sql_node": "sql_node",
             "propose_action": "propose_action",
+            "memory_command": "memory_command",
         },
     )
     g.add_conditional_edges(
@@ -60,6 +63,11 @@ def build_graph(checkpointer: Any = None) -> Any:
     for node in _CONTENT_LEAVES:
         g.add_edge(node, "consolidate")
     g.add_edge("scope_reject", END)
+    g.add_conditional_edges(
+        "memory_command",
+        route_after_memory_command,
+        {"consolidate": "consolidate", "end": END},
+    )
     g.add_edge("consolidate", END)
 
     return g.compile(checkpointer=checkpointer)

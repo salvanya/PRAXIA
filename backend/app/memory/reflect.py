@@ -25,6 +25,11 @@ class ExtractedMemories(BaseModel):
     memories: list[MemoryCandidate]
 
 
+class NeighborVerdict(BaseModel):
+    relation: Literal["duplicate", "supersede", "distinct"]
+    reason: str
+
+
 GATE_PROMPT = (
     "Sos un filtro de memoria de un CRM de prácticas profesionales. Dado el último turno "
     "(usuario + asistente), decidí si hay un hecho o preferencia DURADERO y a nivel PRÁCTICA "
@@ -43,6 +48,17 @@ EXTRACT_PROMPT = (
     "kind: 'preferencia' (cómo quieren las cosas), 'hecho' (dato objetivo), "
     "'episodica' (algo puntual). "
     "Si no hay nada duradero, devolvé una lista vacía."
+)
+
+NEIGHBOR_PROMPT = (
+    "Dado un HECHO NUEVO y una MEMORIA EXISTENTE de la misma práctica profesional, clasificá su "
+    "relación en UNA palabra:\n"
+    "- duplicate: dicen lo MISMO (reformulación, sin cambio de valor).\n"
+    "- supersede: MISMO sujeto/atributo pero el nuevo CAMBIA, actualiza o niega el valor "
+    "(ej: 'los turnos duran 30 min' vs 'los turnos duran 45 min'; 'atendemos sábados' vs 'ya no "
+    "atendemos sábados').\n"
+    "- distinct: hechos DIFERENTES, complementarios o no relacionados.\n"
+    "Ante la duda, distinct (no borres ni deduplifiques)."
 )
 
 
@@ -84,13 +100,26 @@ async def extract(user_text: str, assistant_text: str) -> list[MemoryCandidate]:
     return out.memories[: get_settings().memory_reflect_max_candidates]
 
 
-async def _reflect(practice_id: str, user_text: str, assistant_text: str) -> None:
-    verdict = await gate(user_text, assistant_text)
-    if verdict is None or not verdict.worth_remembering:
-        return
-    source = "explicito" if verdict.is_explicit else "reflexion"
-    salience = 0.8 if verdict.is_explicit else 0.5
-    for candidate in await extract(user_text, assistant_text):
+async def judge_neighbor(new_content: str, existing_content: str) -> str:
+    """Clasifica la relación del hecho nuevo con un vecino existente. 'distinct' si e4b falla
+    (fail-safe: nunca borra ni deduplifica por incertidumbre)."""
+    out = await _structured(
+        NeighborVerdict,
+        [
+            ("system", NEIGHBOR_PROMPT),
+            ("human", f"HECHO NUEVO: {new_content}\nMEMORIA EXISTENTE: {existing_content}"),
+        ],
+    )
+    return out.relation if out is not None else "distinct"
+
+
+async def _store_candidate(
+    practice_id: str, candidate: MemoryCandidate, source: str, salience: float
+) -> None:
+    """Persiste un candidato resolviendo contradicciones (A). Duplicado → touch; contradicción →
+    supersede; distinto → inserta. Con contradiction deshabilitado, store legacy (dedup ≥0.9)."""
+    s = get_settings()
+    if not s.memory_contradiction_enabled:
         await long_term.store(
             practice_id,
             kind=candidate.kind,
@@ -98,6 +127,35 @@ async def _reflect(practice_id: str, user_text: str, assistant_text: str) -> Non
             source=source,
             salience=salience,
         )
+        return
+    probe = await long_term.probe(practice_id, candidate.content)
+    supersede_ids: list[str] = []
+    for neighbor in probe.related:
+        relation = await judge_neighbor(candidate.content, neighbor.content)
+        if relation == "duplicate":
+            await long_term.touch_last_used([neighbor.id])
+            return
+        if relation == "supersede":
+            supersede_ids.append(neighbor.id)
+    await long_term.store(
+        practice_id,
+        kind=candidate.kind,
+        content=candidate.content,
+        source=source,
+        salience=salience,
+        vector=probe.vector,
+        supersede_ids=supersede_ids,
+    )
+
+
+async def _reflect(practice_id: str, user_text: str, assistant_text: str) -> None:
+    verdict = await gate(user_text, assistant_text)
+    if verdict is None or not verdict.worth_remembering:
+        return
+    source = "explicito" if verdict.is_explicit else "reflexion"
+    salience = 0.8 if verdict.is_explicit else 0.5
+    for candidate in await extract(user_text, assistant_text):
+        await _store_candidate(practice_id, candidate, source, salience)
 
 
 async def run(practice_id: str, user_text: str, assistant_text: str) -> None:

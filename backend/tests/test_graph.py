@@ -71,7 +71,14 @@ def test_every_intent_maps_to_a_real_node():
     # Anti-drift: si un slice futuro agrega un intent a INTENTS pero olvida
     # mapearlo en _INTENT_TO_NODE, esto falla en vez de rutear silenciosamente
     # a scope_reject.
-    valid_nodes = {"rag", "chitchat", "scope_reject", "sql_node", "propose_action"}
+    valid_nodes = {
+        "rag",
+        "chitchat",
+        "scope_reject",
+        "sql_node",
+        "propose_action",
+        "memory_command",
+    }
     for intent in router.INTENTS:
         assert intent in edges._INTENT_TO_NODE, f"intent sin mapear: {intent}"
         assert edges._INTENT_TO_NODE[intent] in valid_nodes
