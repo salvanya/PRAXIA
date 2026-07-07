@@ -86,3 +86,43 @@ def test_result_sets_match_scalar_count() -> None:
 
 def test_result_sets_mismatch_extra_row() -> None:
     assert not result_sets_match([{"x": 1}], [{"x": 1}, {"x": 2}])
+
+
+def test_memory_answer_with_sources_fails() -> None:
+    case = EvalCase(
+        question="q",
+        category="rag",
+        intent="rag",
+        expected_behavior="memory_answer",
+        must_include=["5000"],
+        seed_memory="La seña es 5000.",
+    )
+    result = CaseResult(
+        case=case,
+        intent="rag",
+        answer="La seña es 5000, según me indicaste.",
+        retrieved=[],
+        sources=[{"n": 1, "title": "x", "page": None, "document_id": "d"}],
+        candidate_sql="",
+    )
+    assert any("memory_answer con sources" in f for f in deterministic_failures(result))
+
+
+def test_memory_answer_without_sources_passes_source_check() -> None:
+    case = EvalCase(
+        question="q",
+        category="rag",
+        intent="rag",
+        expected_behavior="memory_answer",
+        must_include=["5000"],
+        seed_memory="La seña es 5000.",
+    )
+    result = CaseResult(
+        case=case,
+        intent="rag",
+        answer="La seña es 5000, según me indicaste.",
+        retrieved=[],
+        sources=[],
+        candidate_sql="",
+    )
+    assert deterministic_failures(result) == []

@@ -23,6 +23,8 @@ def deterministic_failures(result: CaseResult) -> list[str]:
         fails.append("cited_answer sin sources")
     if case.expected_behavior == "abstain_no_sources" and result.sources:
         fails.append("abstain con sources (no debería citar)")
+    if case.expected_behavior == "memory_answer" and result.sources:
+        fails.append("memory_answer con sources (no debería citar documentos)")
     if case.category == "sql" and not is_select(result.candidate_sql):
         fails.append(f"candidate_sql no es SELECT: {result.candidate_sql!r}")
     return fails

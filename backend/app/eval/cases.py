@@ -6,7 +6,7 @@ from app.models import Chunk
 
 GOLDEN_SET_PATH = Path(__file__).with_name("golden_set.jsonl")
 
-_BEHAVIORS = frozenset({"cited_answer", "abstain_no_sources", "sql_answer"})
+_BEHAVIORS = frozenset({"cited_answer", "abstain_no_sources", "sql_answer", "memory_answer"})
 _INTENTS = frozenset(
     {"rag", "sql", "action", "chitchat", "out_of_scope"}
 )  # espejo de app.graph.router.INTENTS
@@ -22,6 +22,7 @@ class EvalCase:
     ground_truth: str | None = None
     gold_sql: str | None = None
     seed_doc: str | None = None
+    seed_memory: str | None = None
 
 
 @dataclass
@@ -43,6 +44,11 @@ def _validate(case: EvalCase) -> None:
         )
     if case.intent not in _INTENTS:
         raise ValueError(f"intent inválido {case.intent!r} en {case.question!r}")
+    if case.expected_behavior == "memory_answer":
+        if not case.seed_memory:
+            raise ValueError(f"memory_answer requiere seed_memory en {case.question!r}")
+        if not case.must_include:
+            raise ValueError(f"memory_answer requiere must_include en {case.question!r}")
     if case.expected_behavior == "cited_answer":
         if not case.ground_truth:
             raise ValueError(f"cited_answer requiere ground_truth en {case.question!r}")
@@ -69,6 +75,7 @@ def load_golden_set(path: Path | None = None) -> list[EvalCase]:
             ground_truth=raw.get("ground_truth"),
             gold_sql=raw.get("gold_sql"),
             seed_doc=raw.get("seed_doc"),
+            seed_memory=raw.get("seed_memory"),
         )
         _validate(case)
         cases.append(case)
