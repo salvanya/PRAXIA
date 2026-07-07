@@ -110,5 +110,5 @@ async def test_rag_synthesis_injects_memories(monkeypatch) -> None:
         llm=FakeLLM(),
         memories=[{"content": "Se dice 'pacientes', no 'clientes'.", "kind": "preferencia"}],
     )
-    system_texts = [m[1] for m in captured["messages"] if m[0] == "system"]
-    assert any("pacientes" in t for t in system_texts)
+    human_texts = [m[1] for m in captured["messages"] if m[0] == "human"]
+    assert any("pacientes" in t for t in human_texts)

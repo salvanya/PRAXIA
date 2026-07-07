@@ -2,7 +2,6 @@ from collections.abc import AsyncIterator
 from typing import Any
 
 from app.config import get_settings
-from app.context import format_memories_block
 from app.models import Chunk
 
 ABSTAIN_MESSAGE = "No encuentro esa información en los documentos disponibles."
@@ -13,6 +12,26 @@ SYSTEM_PROMPT = (
     "Si la respuesta no está en los fragmentos, respondé exactamente: "
     f"'{ABSTAIN_MESSAGE}'. No inventes ni uses conocimiento externo."
 )
+
+SYSTEM_PROMPT_WITH_MEMORY = (
+    "Sos el asistente de una práctica profesional. Respondé en español usando ÚNICAMENTE las "
+    "fuentes provistas: los FRAGMENTOS de documentos y lo que el usuario te indicó (memoria).\n"
+    "- Citá cada fragmento que uses con la marca [n].\n"
+    "- Lo que te indicó el usuario NO lleva [n]; cuando lo uses, atribuílo en el texto "
+    "(por ejemplo: 'según me indicaste').\n"
+    "- Si algo que te indicó el usuario CONTRADICE un fragmento sobre el mismo dato, priorizá "
+    "lo que te indicó el usuario (es lo más reciente) y aclará la diferencia (por ejemplo: "
+    "'el protocolo indica 45 minutos, aunque me señalaste que ahora son 60').\n"
+    "- Usá lo que te indicó el usuario SOLO si responde la pregunta; ignorá lo que no aplique.\n"
+    "- Si NI los fragmentos NI lo que te indicó el usuario contienen la respuesta, respondé "
+    f"exactamente: '{ABSTAIN_MESSAGE}'.\n"
+    "No inventes ni uses conocimiento externo."
+)
+
+
+def memories_text(memories: list[dict]) -> str:
+    """Formatea memorias como lista para el bloque de evidencia (síntesis/jueces)."""
+    return "\n".join(f"- {m['content']}" for m in memories)
 
 
 def _format_context(chunks: list[Chunk]) -> str:
@@ -60,15 +79,22 @@ def _default_llm() -> Any:
 async def synthesize_stream(
     query: str, chunks: list[Chunk], llm: Any = None, memories: list[dict] | None = None
 ) -> AsyncIterator[str]:
-    if not chunks:
+    memories = memories or []
+    if not chunks and not memories:
         yield ABSTAIN_MESSAGE
         return
     llm = llm or _default_llm()
-    messages: list[tuple[str, str]] = [("system", SYSTEM_PROMPT)]
-    block = format_memories_block(memories or [])
-    if block:
-        messages.append(("system", block))
-    messages.append(("human", f"Fragmentos:\n\n{_format_context(chunks)}\n\nPregunta: {query}"))
+    if memories:
+        system = SYSTEM_PROMPT_WITH_MEMORY
+        human = (
+            f"Fragmentos:\n\n{_format_context(chunks)}\n\n"
+            f"Lo que me indicaste (memoria):\n{memories_text(memories)}\n\n"
+            f"Pregunta: {query}"
+        )
+    else:
+        system = SYSTEM_PROMPT
+        human = f"Fragmentos:\n\n{_format_context(chunks)}\n\nPregunta: {query}"
+    messages: list[tuple[str, str]] = [("system", system), ("human", human)]
     async for piece in llm.astream(messages):
         text = getattr(piece, "content", "")
         if text:
