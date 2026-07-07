@@ -55,10 +55,9 @@ def _stream_chunks(text: str, size: int = 24) -> list[str]:
 
 
 async def rag_node(state: AgentState) -> dict:
+    memories = state.get("memories", []) if get_settings().rag_memory_merge_enabled else []
     result = await crag_app.ainvoke(
-        initial_rag_state(
-            last_user_text(state), state["practice_id"], memories=state.get("memories", [])
-        )
+        initial_rag_state(last_user_text(state), state["practice_id"], memories=memories)
     )
     answer = result["answer"]
     if result["abstained"]:
