@@ -281,3 +281,72 @@ async def test_fallback_sets_skip_reflect_false(monkeypatch):
     monkeypatch.setattr(memory_command.long_term, "forget", _no_forget)
     out = await _final(memory_command.memory_command_node, new_state("hola", "p", "t"))
     assert out["skip_reflect"] is False
+
+
+async def test_correct_without_match_stores_new_fact(monkeypatch):
+    calls = {}
+
+    async def _extract(text):
+        return MemoryCommand(
+            operation="correct",
+            target="duración de la primera consulta",
+            new_value="La primera consulta dura 90 minutos.",
+        )
+
+    async def _recall(query, practice_id):
+        return []  # sin match previo
+
+    async def _forget(practice_id, ids):
+        raise AssertionError("no debe borrar")
+
+    async def _store(
+        practice_id, *, kind, content, source, salience, vector=None, supersede_ids=()
+    ):
+        calls["store"] = {
+            "content": content,
+            "kind": kind,
+            "source": source,
+            "salience": salience,
+            "supersede_ids": list(supersede_ids),
+        }
+        return "new1"
+
+    monkeypatch.setattr(memory_command, "extract_command", _extract)
+    monkeypatch.setattr(memory_command.long_term, "recall", _recall)
+    monkeypatch.setattr(memory_command.long_term, "forget", _forget)
+    monkeypatch.setattr(memory_command.long_term, "store", _store)
+    tokens = await _run(
+        memory_command.memory_command_node, new_state("corregí la duración", "p", "t")
+    )
+    assert calls["store"] == {
+        "content": "La primera consulta dura 90 minutos.",
+        "kind": "hecho",
+        "source": "explicito",
+        "salience": 0.8,
+        "supersede_ids": [],
+    }
+    assert "ahora lo recuerdo" in tokens.lower()
+
+
+async def test_forget_without_match_still_says_nothing_stored(monkeypatch):
+    calls = {"store": False, "forget": False}
+
+    async def _extract(text):
+        return MemoryCommand(operation="forget", target="algo inexistente", new_value="")
+
+    async def _recall(query, practice_id):
+        return []
+
+    async def _store(*a, **k):
+        calls["store"] = True
+
+    async def _forget(practice_id, ids):
+        calls["forget"] = True
+
+    monkeypatch.setattr(memory_command, "extract_command", _extract)
+    monkeypatch.setattr(memory_command.long_term, "recall", _recall)
+    monkeypatch.setattr(memory_command.long_term, "store", _store)
+    monkeypatch.setattr(memory_command.long_term, "forget", _forget)
+    tokens = await _run(memory_command.memory_command_node, new_state("olvidá X", "p", "t"))
+    assert "no tengo nada" in tokens.lower()
+    assert calls["store"] is False and calls["forget"] is False

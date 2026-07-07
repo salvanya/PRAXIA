@@ -75,7 +75,18 @@ async def memory_command_node(state: AgentState) -> dict:
     confident = top is not None and (top["score"] >= s.memory_dedup_threshold or len(matches) == 1)
 
     if top is None:
-        msg = "No tengo nada guardado sobre eso."
+        new_value = cmd.new_value.strip() if cmd.operation == "correct" else ""
+        if new_value:
+            await long_term.store(
+                practice_id,
+                kind="hecho",
+                content=new_value,
+                source="explicito",
+                salience=0.8,
+            )
+            msg = f"No tenía ese dato; ahora lo recuerdo: «{new_value}»."
+        else:
+            msg = "No tengo nada guardado sobre eso."
     elif not confident:
         msg = (
             "Encontré varias cosas parecidas; "
