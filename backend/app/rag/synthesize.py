@@ -49,6 +49,15 @@ def build_sources(chunks: list[Chunk]) -> list[dict[str, Any]]:
     ]
 
 
+def select_sources(chunks: list[Chunk], answer: str, memories: list[dict]) -> list[dict[str, Any]]:
+    """Fuentes a mostrar. Sin memorias: todas las reranked (comportamiento histórico).
+    Con memorias: solo los chunks efectivamente citados [n] en el answer (memory-only ⇒ [])."""
+    all_sources = build_sources(chunks)
+    if not memories:
+        return all_sources
+    return [s for s in all_sources if f"[{s['n']}]" in answer]
+
+
 def chunks_text(chunks: list[Chunk]) -> str:
     """Formatea chunks como lista para prompts de jueces/reformulador (sin marcas de cita)."""
     return "\n".join(f'- ({c["title"]}) {c["text"]}' for c in chunks)

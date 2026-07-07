@@ -112,3 +112,30 @@ def test_memories_text_formats_bullets():
 async def test_abstains_when_no_chunks_and_no_memories():
     out = await synthesize.synthesize("hola", [], memories=[])
     assert out == synthesize.ABSTAIN_MESSAGE
+
+
+def test_select_sources_no_memories_returns_all():
+    chunks = [_chunk()]
+    assert synthesize.select_sources(chunks, "cualquier cosa", []) == synthesize.build_sources(
+        chunks
+    )
+
+
+def test_select_sources_memory_only_answer_returns_empty():
+    chunks = [_chunk()]
+    # answer sin marcas [n] (respuesta desde memoria) ⇒ sin fuentes
+    assert (
+        synthesize.select_sources(chunks, "Según me indicaste, dura 90 min.", [{"content": "x"}])
+        == []
+    )
+
+
+def test_select_sources_merge_returns_only_cited():
+    c1 = _chunk()
+    c2 = Chunk(
+        text="otro", page=None, chunk_index=1, document_id="doc-2", title="Otro", doc_type="x"
+    )
+    out = synthesize.select_sources(
+        [c1, c2], "Dura 60 [1]. Además me indicaste algo.", [{"content": "x"}]
+    )
+    assert out == [{"n": 1, "title": "Protocolo", "page": 2, "document_id": "doc-1"}]
