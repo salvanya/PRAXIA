@@ -5,12 +5,14 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from app import db
+from app.config import get_settings
 from app.eval import baseline as _baseline
 from app.eval.cases import EvalCase, load_golden_set
 from app.eval.checks import deterministic_failures, execution_accuracy
 from app.eval.fixtures import ensure_rag_fixture
 from app.eval.harness import run_case
 from app.eval.metrics import MetricScores, RagSample, score_rag_cases
+from app.memory import long_term
 
 LAST_RUN_PATH = Path(__file__).with_name("last_run.json")
 
@@ -35,7 +37,21 @@ def gate_exit_code(hard_failures: int, regressions: list[str]) -> int:
 
 
 async def _score_case(case: EvalCase) -> tuple[CaseOutcome, RagSample | None]:
-    result = await run_case(case)
+    seeded_id: str | None = None
+    if case.seed_memory:
+        await long_term.ensure_memories_collection()
+        seeded_id = await long_term.store(
+            get_settings().practice_id,
+            kind="hecho",
+            content=case.seed_memory,
+            source="explicito",
+            salience=0.8,
+        )
+    try:
+        result = await run_case(case)
+    finally:
+        if seeded_id:
+            await long_term.forget(get_settings().practice_id, [seeded_id])
     failures = deterministic_failures(result)
     if case.category == "sql" and not failures and case.gold_sql:
         if not await execution_accuracy(case.gold_sql, result.candidate_sql):

@@ -53,3 +53,9 @@ def test_memoria_rica_defaults() -> None:
     assert s.memory_contradiction_max_candidates == 3
     assert s.memory_command_enabled is True
     assert s.memory_forget_min_score == 0.6
+
+
+def test_rag_memory_merge_enabled_default_true():
+    from app.config import Settings
+
+    assert Settings().rag_memory_merge_enabled is True

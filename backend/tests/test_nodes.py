@@ -560,3 +560,36 @@ async def test_sql_node_no_table_for_empty(monkeypatch):
     monkeypatch.setattr(nodes, "synthesize_sql_answer", _fake_synth)
     tables = await _run_tables(nodes.sql_node, new_state("algo vacío", "p", "t"))
     assert tables == []
+
+
+async def _run_capturing_crag(monkeypatch, *, flag: bool, memories: list[dict]) -> dict:
+    from types import SimpleNamespace
+
+    captured: dict = {}
+
+    class FakeCrag:
+        async def ainvoke(self, state):
+            captured["memories"] = state["memories"]
+            return {"answer": "x", "abstained": True, "reranked": [], "sources": []}
+
+    monkeypatch.setattr(nodes, "crag_app", FakeCrag())
+    monkeypatch.setattr(
+        nodes, "get_settings", lambda: SimpleNamespace(rag_memory_merge_enabled=flag)
+    )
+    state = new_state("¿cuánto vale la seña?", "p", "t")
+    state["memories"] = memories
+    async for _ in _one_node_graph(nodes.rag_node).astream(state, stream_mode="custom"):
+        pass
+    return captured
+
+
+async def test_rag_node_kill_switch_zeroes_memories(monkeypatch):
+    captured = await _run_capturing_crag(
+        monkeypatch, flag=False, memories=[{"content": "La seña vale $5000."}]
+    )
+    assert captured["memories"] == []
+
+
+async def test_rag_node_passes_memories_when_enabled(monkeypatch):
+    captured = await _run_capturing_crag(monkeypatch, flag=True, memories=[{"content": "algo"}])
+    assert captured["memories"] == [{"content": "algo"}]

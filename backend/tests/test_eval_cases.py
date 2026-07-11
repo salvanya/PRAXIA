@@ -83,3 +83,34 @@ def test_real_golden_set_loads() -> None:
     cases = load_golden_set()  # el archivo versionado, schema nuevo
     assert len(cases) >= 4
     assert {c.category for c in cases} == {"rag", "sql"}
+
+
+def test_memory_answer_case_validates() -> None:
+    from app.eval.cases import _validate
+
+    case = EvalCase(
+        question="¿hay que dejar seña?",
+        category="rag",
+        intent="rag",
+        expected_behavior="memory_answer",
+        must_include=["5000"],
+        seed_memory="Para reservar hay que dejar una seña de 5000 pesos.",
+    )
+    _validate(case)  # no raise
+
+
+def test_memory_answer_requires_seed_memory() -> None:
+    import pytest
+
+    from app.eval.cases import _validate
+
+    case = EvalCase(
+        question="q",
+        category="rag",
+        intent="rag",
+        expected_behavior="memory_answer",
+        must_include=["x"],
+        seed_memory=None,
+    )
+    with pytest.raises(ValueError):
+        _validate(case)

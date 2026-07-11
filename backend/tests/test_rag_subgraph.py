@@ -32,10 +32,10 @@ async def test_sufficient_first_try_returns_grounded_answer(monkeypatch):
     async def synth(q, chunks, **kwargs):
         return "La consulta dura 60 min [1]."
 
-    async def jr(q, chunks, llm=None):
+    async def jr(q, chunks, memories=None, llm=None):
         return judges.RelevanceVerdict(sufficient=True, reason="ok")
 
-    async def jg(a, chunks, llm=None):
+    async def jg(a, chunks, memories=None, llm=None):
         return judges.GroundednessVerdict(grounded=True, reason="ok")
 
     _patch(
@@ -55,14 +55,14 @@ async def test_sufficient_first_try_returns_grounded_answer(monkeypatch):
 async def test_insufficient_then_reformulate_then_sufficient(monkeypatch):
     calls = {"r": 0, "reform": 0}
 
-    async def jr(q, chunks, llm=None):
+    async def jr(q, chunks, memories=None, llm=None):
         calls["r"] += 1
         return judges.RelevanceVerdict(sufficient=calls["r"] >= 2, reason="x")
 
     async def synth(q, chunks, **kwargs):
         return "ok [1]."
 
-    async def jg(a, chunks, llm=None):
+    async def jg(a, chunks, memories=None, llm=None):
         return judges.GroundednessVerdict(grounded=True, reason="ok")
 
     async def reform(orig, chunks):
@@ -91,7 +91,7 @@ async def test_insufficient_twice_abstains_without_sources(monkeypatch):
         retr["n"] += 1
         return [_c()]
 
-    async def jr(q, chunks, llm=None):
+    async def jr(q, chunks, memories=None, llm=None):
         return judges.RelevanceVerdict(sufficient=False, reason="no")
 
     async def reform(orig, chunks):
@@ -111,10 +111,10 @@ async def test_ungrounded_answer_abstains_without_sources(monkeypatch):
     async def synth(q, chunks, **kwargs):
         return "La consulta dura 90 min [1]."
 
-    async def jr(q, chunks, llm=None):
+    async def jr(q, chunks, memories=None, llm=None):
         return judges.RelevanceVerdict(sufficient=True, reason="ok")
 
-    async def jg(a, chunks, llm=None):
+    async def jg(a, chunks, memories=None, llm=None):
         return judges.GroundednessVerdict(grounded=False, reason="inventado")
 
     _patch(
@@ -137,10 +137,10 @@ async def test_synth_self_abstain_skips_groundedness(monkeypatch):
     async def synth(q, chunks, **kwargs):
         return ABSTAIN_MESSAGE
 
-    async def jr(q, chunks, llm=None):
+    async def jr(q, chunks, memories=None, llm=None):
         return judges.RelevanceVerdict(sufficient=True, reason="ok")
 
-    async def jg(a, chunks, llm=None):
+    async def jg(a, chunks, memories=None, llm=None):
         ground["called"] = True
         return judges.GroundednessVerdict(grounded=True, reason="ok")
 
@@ -167,7 +167,7 @@ async def test_relevance_judge_failure_is_fail_closed(monkeypatch):
         retr["n"] += 1
         return [_c()]
 
-    async def jr(q, chunks, llm=None):
+    async def jr(q, chunks, memories=None, llm=None):
         raise RuntimeError("juez caido")
 
     async def reform(orig, chunks):
@@ -189,10 +189,10 @@ async def test_groundedness_judge_failure_is_fail_closed(monkeypatch):
     async def synth(q, chunks, **kwargs):
         return "La consulta dura 60 min [1]."
 
-    async def jr(q, chunks, llm=None):
+    async def jr(q, chunks, memories=None, llm=None):
         return judges.RelevanceVerdict(sufficient=True, reason="ok")
 
-    async def jg(a, chunks, llm=None):
+    async def jg(a, chunks, memories=None, llm=None):
         raise RuntimeError("juez caido")
 
     _patch(
@@ -216,7 +216,7 @@ async def test_empty_rerank_is_insufficient_without_calling_judge(monkeypatch):
     async def empty_rerank(query, chunks):
         return []
 
-    async def jr(q, chunks, llm=None):
+    async def jr(q, chunks, memories=None, llm=None):
         calls["jr"] += 1
         return judges.RelevanceVerdict(sufficient=True, reason="no deberia llamarse")
 
@@ -243,10 +243,10 @@ async def test_empty_synthesis_abstains_without_sources(monkeypatch):
     async def synth(q, chunks, **kwargs):
         return "   "
 
-    async def jr(q, chunks, llm=None):
+    async def jr(q, chunks, memories=None, llm=None):
         return judges.RelevanceVerdict(sufficient=True, reason="ok")
 
-    async def jg(a, chunks, llm=None):
+    async def jg(a, chunks, memories=None, llm=None):
         ground["called"] = True
         return judges.GroundednessVerdict(grounded=True, reason="ok")
 
@@ -262,3 +262,95 @@ async def test_empty_synthesis_abstains_without_sources(monkeypatch):
     assert ground["called"] is False
     assert out["abstained"] is True
     assert out["sources"] == []
+
+
+# ---------------------------------------------------------------------------
+# New tests: memory-aware behaviour (Task 4)
+# ---------------------------------------------------------------------------
+
+
+async def test_memory_relevant_with_offtopic_docs_does_not_abstain(monkeypatch):
+    """El bug: docs off-topic + memoria relevante ⇒ NO abstiene, responde con el hecho."""
+
+    async def jr(q, chunks, memories=None, llm=None):
+        return judges.RelevanceVerdict(sufficient=True, reason="memoria responde")
+
+    async def synth(q, chunks, **kwargs):
+        assert kwargs.get("memories"), "la memoria debe llegar a la síntesis"
+        return "La seña vale $5000, según me indicaste."
+
+    async def jg(a, chunks, memories=None, llm=None):
+        assert memories, "la memoria debe llegar al juez de groundedness"
+        return judges.GroundednessVerdict(grounded=True, reason="respaldado por memoria")
+
+    _patch(
+        monkeypatch,
+        retrieve=_ok_retrieve,
+        rerank=_ok_rerank,
+        judge_relevance=jr,
+        synthesize=synth,
+        judge_groundedness=jg,
+    )
+    state = rag_subgraph.initial_rag_state(
+        "¿cuánto vale la seña?", "p", memories=[{"content": "La seña vale $5000."}]
+    )
+    out = await rag_subgraph.crag_app.ainvoke(state)
+    assert out["abstained"] is False
+    assert "$5000" in out["answer"]
+    assert out["sources"] == []  # answer sin [n] ⇒ memory-only, sin fuentes
+
+
+async def test_memory_only_empty_rerank_still_grades_with_memory(monkeypatch):
+    """reranked vacío pero con memoria ⇒ grade NO corta; consulta al juez memory-aware."""
+    calls = {"jr": 0}
+
+    async def empty_rerank(query, chunks):
+        return []
+
+    async def jr(q, chunks, memories=None, llm=None):
+        calls["jr"] += 1
+        return judges.RelevanceVerdict(sufficient=True, reason="memoria")
+
+    async def synth(q, chunks, **kwargs):
+        return "Respuesta desde memoria."
+
+    async def jg(a, chunks, memories=None, llm=None):
+        return judges.GroundednessVerdict(grounded=True, reason="ok")
+
+    _patch(
+        monkeypatch,
+        retrieve=_ok_retrieve,
+        rerank=empty_rerank,
+        judge_relevance=jr,
+        synthesize=synth,
+        judge_groundedness=jg,
+    )
+    state = rag_subgraph.initial_rag_state("q", "p", memories=[{"content": "algo"}])
+    out = await rag_subgraph.crag_app.ainvoke(state)
+    assert calls["jr"] == 1
+    assert out["abstained"] is False
+
+
+async def test_merge_answer_keeps_only_cited_sources(monkeypatch):
+    """Merge: answer cita [1] y usa memoria ⇒ sources = solo el chunk citado."""
+
+    async def jr(q, chunks, memories=None, llm=None):
+        return judges.RelevanceVerdict(sufficient=True, reason="ok")
+
+    async def synth(q, chunks, **kwargs):
+        return "Dura 60 min [1], aunque me indicaste que ahora son 90."
+
+    async def jg(a, chunks, memories=None, llm=None):
+        return judges.GroundednessVerdict(grounded=True, reason="ok")
+
+    _patch(
+        monkeypatch,
+        retrieve=_ok_retrieve,
+        rerank=_ok_rerank,
+        judge_relevance=jr,
+        synthesize=synth,
+        judge_groundedness=jg,
+    )
+    state = rag_subgraph.initial_rag_state("¿cuánto dura?", "p", memories=[{"content": "90 min"}])
+    out = await rag_subgraph.crag_app.ainvoke(state)
+    assert out["sources"] == [{"n": 1, "title": "Protocolo", "page": None, "document_id": "1"}]

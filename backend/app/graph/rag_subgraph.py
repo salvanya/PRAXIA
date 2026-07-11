@@ -9,7 +9,7 @@ from app.rag.judges import judge_groundedness, judge_relevance
 from app.rag.reformulate import reformulate
 from app.rag.rerank import rerank
 from app.rag.retrieve import retrieve
-from app.rag.synthesize import ABSTAIN_MESSAGE, build_sources, synthesize
+from app.rag.synthesize import ABSTAIN_MESSAGE, select_sources, synthesize
 
 logger = logging.getLogger(__name__)
 
@@ -54,10 +54,13 @@ async def retrieve_node(state: RagState) -> dict[str, Any]:
 
 
 async def grade_node(state: RagState) -> dict[str, Any]:
-    if not state["reranked"]:
+    memories = state.get("memories", [])
+    if not state["reranked"] and not memories:
         return {"sufficient": False}
     try:
-        verdict = await judge_relevance(state["original_query"], state["reranked"])
+        verdict = await judge_relevance(
+            state["original_query"], state["reranked"], memories=memories
+        )
         return {"sufficient": verdict.sufficient}
     except Exception:
         logger.warning("juez de relevancia falló; trato como insuficiente", exc_info=True)
@@ -92,8 +95,9 @@ def synth_router(state: RagState) -> str:
 
 
 async def groundedness_node(state: RagState) -> dict[str, Any]:
+    memories = state.get("memories", [])
     try:
-        verdict = await judge_groundedness(state["answer"], state["reranked"])
+        verdict = await judge_groundedness(state["answer"], state["reranked"], memories=memories)
         grounded = verdict.grounded
     except Exception:
         logger.warning("juez de groundedness falló; trato como no fundamentado", exc_info=True)
@@ -102,7 +106,7 @@ async def groundedness_node(state: RagState) -> dict[str, Any]:
         return {
             "grounded": True,
             "abstained": False,
-            "sources": build_sources(state["reranked"]),
+            "sources": select_sources(state["reranked"], state["answer"], memories),
         }
     return {"grounded": False}
 
